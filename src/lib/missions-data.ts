@@ -1,0 +1,86 @@
+export const MISSIONS = [
+  {
+    day: 1,
+    title: "Build a Telegram Bot",
+    description: "Create your first automated product — a Telegram bot that responds to commands and delivers value.",
+    steps: [
+      { title: "Set up BotFather & get API token", description: "Open Telegram, find @BotFather, create a new bot and save your token." },
+      { title: "Create bot project with Node.js", description: "Initialize a project and install node-telegram-bot-api." },
+      { title: "Write /start command handler", description: "Make the bot respond to /start with a welcome message." },
+      { title: "Add a useful command", description: "Add a command that solves a real problem (e.g., /motivate, /tip, /weather)." },
+      { title: "Deploy to Railway or Render", description: "Push your bot live so it runs 24/7." },
+    ],
+  },
+  {
+    day: 2,
+    title: "Build a Landing Page",
+    description: "Create a landing page that sells your product or service. Convert visitors into leads.",
+    steps: [
+      { title: "Define your offer", description: "Write a clear value proposition in one sentence." },
+      { title: "Create hero section", description: "Build a hero with headline, subtext, and CTA button." },
+      { title: "Add social proof section", description: "Add testimonials, numbers, or trust badges." },
+      { title: "Build pricing or signup section", description: "Add a form or pricing table that drives action." },
+      { title: "Deploy to Vercel", description: "Push live and get a shareable URL." },
+    ],
+  },
+  {
+    day: 3,
+    title: "Get Your First Client",
+    description: "Use outreach and positioning to land your first paying client or user.",
+    steps: [
+      { title: "Identify 10 potential clients", description: "Research and list 10 people who need what you built." },
+      { title: "Write a cold DM template", description: "Create a short, value-first message template." },
+      { title: "Send 10 messages", description: "Reach out on Twitter, LinkedIn, Telegram, or Instagram." },
+      { title: "Follow up with interested leads", description: "Reply within 1 hour, offer a free trial or demo." },
+      { title: "Close your first deal", description: "Agree on terms, send invoice or payment link." },
+    ],
+  },
+  {
+    day: 4,
+    title: "Build an AI-Powered Tool",
+    description: "Create a tool that uses AI to automate a task people pay for.",
+    steps: [
+      { title: "Pick a use case", description: "Choose something people waste time on (emails, summaries, content)." },
+      { title: "Set up Claude API", description: "Get your API key and make your first request." },
+      { title: "Build the input/output flow", description: "Create a simple form → AI processing → result display." },
+      { title: "Add a wrapper UI", description: "Style it so it looks like a real product." },
+      { title: "Deploy and share", description: "Ship it and post on social media." },
+    ],
+  },
+  {
+    day: 5,
+    title: "Set Up Payments",
+    description: "Monetize your product with Stripe or a payment link.",
+    steps: [
+      { title: "Create Stripe account", description: "Sign up at stripe.com and complete onboarding." },
+      { title: "Create a product & price", description: "Add your product with a price in Stripe dashboard." },
+      { title: "Generate a payment link", description: "Create a shareable payment link for your product." },
+      { title: "Integrate checkout on your landing", description: "Add a 'Buy Now' button that redirects to Stripe." },
+      { title: "Test the full flow", description: "Make a test purchase and verify everything works." },
+    ],
+  },
+  {
+    day: 6,
+    title: "Automate with n8n",
+    description: "Build automations that save you hours of manual work.",
+    steps: [
+      { title: "Set up n8n cloud or self-hosted", description: "Create an account at n8n.io or deploy locally." },
+      { title: "Build a lead notification workflow", description: "Trigger on new signup → send Telegram/email notification." },
+      { title: "Build a content pipeline", description: "Auto-generate social posts from your product updates." },
+      { title: "Connect to your existing tools", description: "Link Google Sheets, Notion, or your database." },
+      { title: "Schedule a recurring workflow", description: "Set up a daily/weekly automated task." },
+    ],
+  },
+  {
+    day: 7,
+    title: "Launch & Scale",
+    description: "Put everything together. Launch publicly and set up for growth.",
+    steps: [
+      { title: "Write a launch post", description: "Draft a compelling launch announcement for social media." },
+      { title: "Post on 3 platforms", description: "Share on Twitter, LinkedIn, and one community (Reddit, Indie Hackers)." },
+      { title: "Set up analytics", description: "Add PostHog, Plausible, or Google Analytics to track visitors." },
+      { title: "Collect feedback", description: "Add a feedback form or reach out to first users." },
+      { title: "Plan your next sprint", description: "Based on feedback, plan the next 7 days of building." },
+    ],
+  },
+];
