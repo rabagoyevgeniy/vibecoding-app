@@ -12,20 +12,24 @@ export function ProgressBar({ value, max, label }: ProgressBarProps) {
   return (
     <div>
       {label && (
-        <div className="mb-1 flex justify-between text-sm">
+        <div className="mb-1.5 flex justify-between text-sm">
           <span style={{ color: "var(--text-muted)" }}>{label}</span>
-          <span style={{ color: "var(--accent-light)" }}>
+          <span className="font-medium" style={{ color: "var(--accent-light)" }}>
             {value}/{max}
           </span>
         </div>
       )}
       <div
-        className="h-2 w-full overflow-hidden rounded-full"
-        style={{ background: "var(--border)" }}
+        className="h-2 w-full overflow-hidden"
+        style={{ background: "var(--bg-card)", borderRadius: "var(--radius-full)" }}
       >
         <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, background: "var(--accent)" }}
+          className="h-full transition-all duration-500"
+          style={{
+            width: `${pct}%`,
+            background: "linear-gradient(90deg, var(--accent), var(--accent-light))",
+            borderRadius: "var(--radius-full)",
+          }}
         />
       </div>
     </div>

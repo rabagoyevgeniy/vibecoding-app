@@ -1,86 +1,158 @@
-export const MISSIONS = [
+export interface StepInteraction {
+  type: "input" | "confirm" | "ai";
+  promptKey: string;
+  inputCount?: number;
+  placeholderKey?: string;
+}
+
+export type SkillType = "sales" | "product" | "content" | "ai";
+
+export interface MissionStep {
+  titleKey: string;
+  descKey: string;
+  interaction: StepInteraction;
+  skill: SkillType;
+}
+
+export interface SideQuest {
+  titleKey: string;
+  skill: SkillType;
+  xp: number;
+}
+
+export interface Mission {
+  day: number;
+  titleKey: string;
+  descKey: string;
+  steps: MissionStep[];
+  sideQuests: SideQuest[];
+}
+
+export const MISSIONS: Mission[] = [
+  // DAY 1: FIND YOUR IDEA
   {
     day: 1,
-    title: "Build a Telegram Bot",
-    description: "Create your first automated product — a Telegram bot that responds to commands and delivers value.",
+    titleKey: "missions.day1_title",
+    descKey: "missions.day1_desc",
     steps: [
-      { title: "Set up BotFather & get API token", description: "Open Telegram, find @BotFather, create a new bot and save your token." },
-      { title: "Create bot project with Node.js", description: "Initialize a project and install node-telegram-bot-api." },
-      { title: "Write /start command handler", description: "Make the bot respond to /start with a welcome message." },
-      { title: "Add a useful command", description: "Add a command that solves a real problem (e.g., /motivate, /tip, /weather)." },
-      { title: "Deploy to Railway or Render", description: "Push your bot live so it runs 24/7." },
+      { titleKey: "missions.day1_step1", descKey: "missions.day1_step1_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day1_step1_prompt", placeholderKey: "missions.day1_step1_placeholder" } },
+      { titleKey: "missions.day1_step2", descKey: "missions.day1_step2_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day1_step2_prompt", inputCount: 3, placeholderKey: "missions.day1_step2_placeholder" } },
+      { titleKey: "missions.day1_step3", descKey: "missions.day1_step3_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day1_step3_prompt", placeholderKey: "missions.day1_step3_placeholder" } },
+      { titleKey: "missions.day1_step4", descKey: "missions.day1_step4_desc", skill: "ai", interaction: { type: "ai", promptKey: "missions.day1_step4_prompt" } },
+      { titleKey: "missions.day1_step5", descKey: "missions.day1_step5_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day1_step5_prompt", placeholderKey: "missions.day1_step5_placeholder" } },
+      { titleKey: "missions.day1_step6", descKey: "missions.day1_step6_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day1_step6_prompt", inputCount: 5, placeholderKey: "missions.day1_step6_placeholder" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day1_sq1", skill: "product", xp: 15 },
+      { titleKey: "side_quests.day1_sq2", skill: "ai", xp: 15 },
     ],
   },
+  // DAY 2: BUILD YOUR MVP
   {
     day: 2,
-    title: "Build a Landing Page",
-    description: "Create a landing page that sells your product or service. Convert visitors into leads.",
+    titleKey: "missions.day2_title",
+    descKey: "missions.day2_desc",
     steps: [
-      { title: "Define your offer", description: "Write a clear value proposition in one sentence." },
-      { title: "Create hero section", description: "Build a hero with headline, subtext, and CTA button." },
-      { title: "Add social proof section", description: "Add testimonials, numbers, or trust badges." },
-      { title: "Build pricing or signup section", description: "Add a form or pricing table that drives action." },
-      { title: "Deploy to Vercel", description: "Push live and get a shareable URL." },
+      { titleKey: "missions.day2_step1", descKey: "missions.day2_step1_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day2_step1_prompt", placeholderKey: "missions.day2_step1_placeholder" } },
+      { titleKey: "missions.day2_step2", descKey: "missions.day2_step2_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day2_step2_prompt" } },
+      { titleKey: "missions.day2_step3", descKey: "missions.day2_step3_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day2_step3_prompt", placeholderKey: "missions.day2_step3_placeholder" } },
+      { titleKey: "missions.day2_step4", descKey: "missions.day2_step4_desc", skill: "content", interaction: { type: "ai", promptKey: "missions.day2_step4_prompt" } },
+      { titleKey: "missions.day2_step5", descKey: "missions.day2_step5_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day2_step5_prompt", placeholderKey: "missions.day2_step5_placeholder" } },
+      { titleKey: "missions.day2_step6", descKey: "missions.day2_step6_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day2_step6_prompt" } },
+      { titleKey: "missions.day2_step7", descKey: "missions.day2_step7_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day2_step7_prompt" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day2_sq1", skill: "product", xp: 15 },
+      { titleKey: "side_quests.day2_sq2", skill: "ai", xp: 15 },
     ],
   },
+  // DAY 3: SET UP YOUR SYSTEM
   {
     day: 3,
-    title: "Get Your First Client",
-    description: "Use outreach and positioning to land your first paying client or user.",
+    titleKey: "missions.day3_title",
+    descKey: "missions.day3_desc",
     steps: [
-      { title: "Identify 10 potential clients", description: "Research and list 10 people who need what you built." },
-      { title: "Write a cold DM template", description: "Create a short, value-first message template." },
-      { title: "Send 10 messages", description: "Reach out on Twitter, LinkedIn, Telegram, or Instagram." },
-      { title: "Follow up with interested leads", description: "Reply within 1 hour, offer a free trial or demo." },
-      { title: "Close your first deal", description: "Agree on terms, send invoice or payment link." },
+      { titleKey: "missions.day3_step1", descKey: "missions.day3_step1_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day3_step1_prompt", placeholderKey: "missions.day3_step1_placeholder" } },
+      { titleKey: "missions.day3_step2", descKey: "missions.day3_step2_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day3_step2_prompt", placeholderKey: "missions.day3_step2_placeholder" } },
+      { titleKey: "missions.day3_step3", descKey: "missions.day3_step3_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day3_step3_prompt" } },
+      { titleKey: "missions.day3_step4", descKey: "missions.day3_step4_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day3_step4_prompt", placeholderKey: "missions.day3_step4_placeholder" } },
+      { titleKey: "missions.day3_step5", descKey: "missions.day3_step5_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day3_step5_prompt" } },
+      { titleKey: "missions.day3_step6", descKey: "missions.day3_step6_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day3_step6_prompt" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day3_sq1", skill: "product", xp: 15 },
+      { titleKey: "side_quests.day3_sq2", skill: "sales", xp: 15 },
     ],
   },
+  // DAY 4: GET YOUR FIRST CLIENT
   {
     day: 4,
-    title: "Build an AI-Powered Tool",
-    description: "Create a tool that uses AI to automate a task people pay for.",
+    titleKey: "missions.day4_title",
+    descKey: "missions.day4_desc",
     steps: [
-      { title: "Pick a use case", description: "Choose something people waste time on (emails, summaries, content)." },
-      { title: "Set up Claude API", description: "Get your API key and make your first request." },
-      { title: "Build the input/output flow", description: "Create a simple form → AI processing → result display." },
-      { title: "Add a wrapper UI", description: "Style it so it looks like a real product." },
-      { title: "Deploy and share", description: "Ship it and post on social media." },
+      { titleKey: "missions.day4_step1", descKey: "missions.day4_step1_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day4_step1_prompt", inputCount: 5, placeholderKey: "missions.day4_step1_placeholder" } },
+      { titleKey: "missions.day4_step2", descKey: "missions.day4_step2_desc", skill: "content", interaction: { type: "ai", promptKey: "missions.day4_step2_prompt" } },
+      { titleKey: "missions.day4_step3", descKey: "missions.day4_step3_desc", skill: "content", interaction: { type: "ai", promptKey: "missions.day4_step3_prompt" } },
+      { titleKey: "missions.day4_step4", descKey: "missions.day4_step4_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day4_step4_prompt", inputCount: 3, placeholderKey: "missions.day4_step4_placeholder" } },
+      { titleKey: "missions.day4_step5", descKey: "missions.day4_step5_desc", skill: "sales", interaction: { type: "confirm", promptKey: "missions.day4_step5_prompt" } },
+      { titleKey: "missions.day4_step6", descKey: "missions.day4_step6_desc", skill: "content", interaction: { type: "input", promptKey: "missions.day4_step6_prompt", placeholderKey: "missions.day4_step6_placeholder" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day4_sq1", skill: "content", xp: 15 },
+      { titleKey: "side_quests.day4_sq2", skill: "sales", xp: 20 },
     ],
   },
+  // DAY 5: SCALE YOUR OUTREACH
   {
     day: 5,
-    title: "Set Up Payments",
-    description: "Monetize your product with Stripe or a payment link.",
+    titleKey: "missions.day5_title",
+    descKey: "missions.day5_desc",
     steps: [
-      { title: "Create Stripe account", description: "Sign up at stripe.com and complete onboarding." },
-      { title: "Create a product & price", description: "Add your product with a price in Stripe dashboard." },
-      { title: "Generate a payment link", description: "Create a shareable payment link for your product." },
-      { title: "Integrate checkout on your landing", description: "Add a 'Buy Now' button that redirects to Stripe." },
-      { title: "Test the full flow", description: "Make a test purchase and verify everything works." },
+      { titleKey: "missions.day5_step1", descKey: "missions.day5_step1_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day5_step1_prompt", placeholderKey: "missions.day5_step1_placeholder" } },
+      { titleKey: "missions.day5_step2", descKey: "missions.day5_step2_desc", skill: "ai", interaction: { type: "ai", promptKey: "missions.day5_step2_prompt" } },
+      { titleKey: "missions.day5_step3", descKey: "missions.day5_step3_desc", skill: "content", interaction: { type: "input", promptKey: "missions.day5_step3_prompt", placeholderKey: "missions.day5_step3_placeholder" } },
+      { titleKey: "missions.day5_step4", descKey: "missions.day5_step4_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day5_step4_prompt", placeholderKey: "missions.day5_step4_placeholder" } },
+      { titleKey: "missions.day5_step5", descKey: "missions.day5_step5_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day5_step5_prompt", inputCount: 3, placeholderKey: "missions.day5_step5_placeholder" } },
+      { titleKey: "missions.day5_step6", descKey: "missions.day5_step6_desc", skill: "content", interaction: { type: "input", promptKey: "missions.day5_step6_prompt", placeholderKey: "missions.day5_step6_placeholder" } },
+      { titleKey: "missions.day5_step7", descKey: "missions.day5_step7_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day5_step7_prompt", placeholderKey: "missions.day5_step7_placeholder" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day5_sq1", skill: "content", xp: 15 },
+      { titleKey: "side_quests.day5_sq2", skill: "sales", xp: 20 },
     ],
   },
+  // DAY 6: ADD AI & AUTOMATE
   {
     day: 6,
-    title: "Automate with n8n",
-    description: "Build automations that save you hours of manual work.",
+    titleKey: "missions.day6_title",
+    descKey: "missions.day6_desc",
     steps: [
-      { title: "Set up n8n cloud or self-hosted", description: "Create an account at n8n.io or deploy locally." },
-      { title: "Build a lead notification workflow", description: "Trigger on new signup → send Telegram/email notification." },
-      { title: "Build a content pipeline", description: "Auto-generate social posts from your product updates." },
-      { title: "Connect to your existing tools", description: "Link Google Sheets, Notion, or your database." },
-      { title: "Schedule a recurring workflow", description: "Set up a daily/weekly automated task." },
+      { titleKey: "missions.day6_step1", descKey: "missions.day6_step1_desc", skill: "ai", interaction: { type: "input", promptKey: "missions.day6_step1_prompt", placeholderKey: "missions.day6_step1_placeholder" } },
+      { titleKey: "missions.day6_step2", descKey: "missions.day6_step2_desc", skill: "ai", interaction: { type: "confirm", promptKey: "missions.day6_step2_prompt" } },
+      { titleKey: "missions.day6_step3", descKey: "missions.day6_step3_desc", skill: "ai", interaction: { type: "confirm", promptKey: "missions.day6_step3_prompt" } },
+      { titleKey: "missions.day6_step4", descKey: "missions.day6_step4_desc", skill: "ai", interaction: { type: "input", promptKey: "missions.day6_step4_prompt", placeholderKey: "missions.day6_step4_placeholder" } },
+      { titleKey: "missions.day6_step5", descKey: "missions.day6_step5_desc", skill: "ai", interaction: { type: "confirm", promptKey: "missions.day6_step5_prompt" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day6_sq1", skill: "ai", xp: 20 },
+      { titleKey: "side_quests.day6_sq2", skill: "content", xp: 15 },
     ],
   },
+  // DAY 7: LAUNCH & SCALE
   {
     day: 7,
-    title: "Launch & Scale",
-    description: "Put everything together. Launch publicly and set up for growth.",
+    titleKey: "missions.day7_title",
+    descKey: "missions.day7_desc",
     steps: [
-      { title: "Write a launch post", description: "Draft a compelling launch announcement for social media." },
-      { title: "Post on 3 platforms", description: "Share on Twitter, LinkedIn, and one community (Reddit, Indie Hackers)." },
-      { title: "Set up analytics", description: "Add PostHog, Plausible, or Google Analytics to track visitors." },
-      { title: "Collect feedback", description: "Add a feedback form or reach out to first users." },
-      { title: "Plan your next sprint", description: "Based on feedback, plan the next 7 days of building." },
+      { titleKey: "missions.day7_step1", descKey: "missions.day7_step1_desc", skill: "content", interaction: { type: "ai", promptKey: "missions.day7_step1_prompt" } },
+      { titleKey: "missions.day7_step2", descKey: "missions.day7_step2_desc", skill: "sales", interaction: { type: "input", promptKey: "missions.day7_step2_prompt", inputCount: 3, placeholderKey: "missions.day7_step2_placeholder" } },
+      { titleKey: "missions.day7_step3", descKey: "missions.day7_step3_desc", skill: "ai", interaction: { type: "confirm", promptKey: "missions.day7_step3_prompt" } },
+      { titleKey: "missions.day7_step4", descKey: "missions.day7_step4_desc", skill: "product", interaction: { type: "confirm", promptKey: "missions.day7_step4_prompt" } },
+      { titleKey: "missions.day7_step5", descKey: "missions.day7_step5_desc", skill: "product", interaction: { type: "input", promptKey: "missions.day7_step5_prompt", placeholderKey: "missions.day7_step5_placeholder" } },
+    ],
+    sideQuests: [
+      { titleKey: "side_quests.day7_sq1", skill: "content", xp: 20 },
+      { titleKey: "side_quests.day7_sq2", skill: "sales", xp: 25 },
     ],
   },
 ];
