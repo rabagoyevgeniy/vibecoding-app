@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { I18nProvider } from "@/lib/i18n";
+import { AuthProvider } from "@/lib/auth";
+import { ClientShell } from "@/components/ClientShell";
 
 export const metadata: Metadata = {
   title: "VibeCoding — Build Real Products with AI",
@@ -15,7 +17,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
-        <I18nProvider>{children}</I18nProvider>
+        <AuthProvider>
+          <I18nProvider>
+            <ClientShell>{children}</ClientShell>
+          </I18nProvider>
+        </AuthProvider>
       </body>
     </html>
   );

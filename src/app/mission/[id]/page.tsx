@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { MISSIONS } from "@/lib/missions-data";
+import { MISSIONS, type Mission } from "@/lib/missions-data";
 import { StepList } from "@/components/StepList";
 import { StepModal } from "@/components/StepModal";
 import { SideQuests } from "@/components/SideQuests";
@@ -13,86 +13,203 @@ import { useI18n } from "@/lib/i18n";
 import { addLeadsFromStepResponse } from "@/lib/leads";
 import { addSkillXP } from "@/lib/skills";
 import { getLessonsForDay } from "@/lib/learning-data";
+import { DaySummary } from "@/components/DaySummary";
+import { useAuth } from "@/lib/auth";
+import {
+  getAllPlanDays,
+  markPlanDayCompleted,
+  syncPlanDayStatuses,
+  type StoredPlanDay,
+} from "@/lib/plan-engine";
+import {
+  DEFAULT_PROGRESS,
+  getCompletedSteps as getStoredCompletedSteps,
+  getStoredProgress,
+  initializeProgressFromPlanDays,
+  mergeProgress,
+  setStoredProgress,
+  type ProgressData,
+} from "@/lib/progress";
 
-interface ProgressData {
-  current_day: number;
-  xp: number;
-  level: number;
+function mapPlanDayToMission(
+  planDay: StoredPlanDay,
+  fallbackMission?: Mission
+): Mission {
+  return {
+    day: planDay.day,
+    titleKey: planDay.title,
+    descKey: planDay.description,
+    steps: planDay.steps.map((step) => ({
+      titleKey: step.title,
+      descKey: step.description,
+      skill: step.skill,
+      xp: step.xp,
+      interaction: {
+        type: step.type,
+        promptKey: step.description || step.title,
+        placeholderKey:
+          step.type === "input" ? "step_modal.input_placeholder" : undefined,
+      },
+    })),
+    sideQuests: fallbackMission?.sideQuests ?? [],
+  };
+}
+
+function getStoredSideQuests(day: number): number[] {
+  if (typeof window === "undefined") return [];
+
+  const raw = localStorage.getItem(`vc_sidequests_${day}`);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((quest): quest is number => Number.isInteger(quest))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export default function MissionPage() {
   const params = useParams();
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const { user, loading } = useAuth();
   const day = Number(params.id);
-  const mission = MISSIONS.find((m) => m.day === day);
 
+  const [mission, setMission] = useState<Mission | null>(null);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [activeStep, setActiveStep] = useState(0);
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [modalStep, setModalStep] = useState<number | null>(null);
   const [isEditingStep, setIsEditingStep] = useState(false);
   const [completedSideQuests, setCompletedSideQuests] = useState<number[]>([]);
+  const [showSummary, setShowSummary] = useState(false);
+  const [hasDynamicPlan, setHasDynamicPlan] = useState(false);
+  const [dayStatus, setDayStatus] = useState<StoredPlanDay["status"] | null>(null);
+
+  const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
   useEffect(() => {
-    const p = localStorage.getItem("vc_progress");
-    if (!p) {
-      router.push("/onboarding");
+    if (!Number.isFinite(day) || day < 1 || day > 7) {
+      router.push("/dashboard");
       return;
     }
-    setProgress(JSON.parse(p));
 
-    const saved = localStorage.getItem(`vc_steps_${day}`);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setCompletedSteps(parsed);
-      const firstIncomplete = mission?.steps.findIndex((_, i) => !parsed.includes(i));
-      if (firstIncomplete !== undefined && firstIncomplete >= 0) {
-        setActiveStep(firstIncomplete);
+    if (loading) return;
+
+    let cancelled = false;
+
+    async function loadMissionData() {
+      const fallbackMission = MISSIONS.find((item) => item.day === day);
+      let resolvedMission = fallbackMission ?? null;
+      let resolvedHasDynamicPlan = false;
+      let resolvedDayStatus: StoredPlanDay["status"] | null = null;
+      let inferredProgress = DEFAULT_PROGRESS;
+
+      if (user) {
+        const rawPlanDays = await getAllPlanDays(user.id);
+
+        if (rawPlanDays.length > 0) {
+          const syncedPlanDays = await syncPlanDayStatuses(user.id, rawPlanDays);
+          const matchedDay = syncedPlanDays.find((item) => item.day === day);
+
+          if (matchedDay) {
+            resolvedMission = mapPlanDayToMission(matchedDay, fallbackMission);
+            resolvedHasDynamicPlan = true;
+            resolvedDayStatus = matchedDay.status;
+          }
+
+          inferredProgress = initializeProgressFromPlanDays(syncedPlanDays);
+        }
       }
+
+      if (!resolvedMission) {
+        router.push("/dashboard");
+        return;
+      }
+
+      const storedProgress = mergeProgress(getStoredProgress(), inferredProgress);
+      setStoredProgress(storedProgress);
+
+      const savedSteps = getStoredCompletedSteps(day);
+      const firstIncomplete = resolvedMission.steps.findIndex(
+        (_, index) => !savedSteps.includes(index)
+      );
+
+      if (cancelled) return;
+
+      setMission(resolvedMission);
+      setHasDynamicPlan(resolvedHasDynamicPlan);
+      setDayStatus(resolvedDayStatus);
+      setProgress(storedProgress);
+      setCompletedSteps(savedSteps);
+      setCompletedSideQuests(getStoredSideQuests(day));
+      setActiveStep(
+        firstIncomplete >= 0
+          ? firstIncomplete
+          : Math.max(resolvedMission.steps.length - 1, 0)
+      );
     }
 
-    const savedSQ = localStorage.getItem(`vc_sidequests_${day}`);
-    if (savedSQ) setCompletedSideQuests(JSON.parse(savedSQ));
-  }, [day, router, mission]);
+    void loadMissionData();
 
-  if (!mission || !progress) return null;
+    return () => {
+      cancelled = true;
+    };
+  }, [day, user, loading, router]);
+
+  if (loading || !mission || !progress) return null;
+
+  async function syncDynamicDayCompletion() {
+    if (!user || !hasDynamicPlan || dayStatus === "completed") return;
+
+    await markPlanDayCompleted(user.id, day);
+    setDayStatus("completed");
+  }
 
   function handleToggle(index: number) {
     if (completedSteps.includes(index)) {
-      // Uncheck — remove from completed (no XP penalty)
       setCompletedSteps((prev) => {
-        const next = prev.filter((s) => s !== index);
+        const next = prev.filter((stepIndex) => stepIndex !== index);
         localStorage.setItem(`vc_steps_${day}`, JSON.stringify(next));
         return next;
       });
       return;
     }
-    // Open modal for incomplete steps
+
     setIsEditingStep(false);
     setModalStep(index);
   }
 
   function handleEdit(index: number) {
-    // Open modal with saved response pre-filled
     setIsEditingStep(true);
     setModalStep(index);
   }
 
   function handleSideQuestToggle(index: number) {
+    const currentMission = mission;
+    if (!currentMission) return;
+
     setCompletedSideQuests((prev) => {
       const wasDone = prev.includes(index);
-      const next = wasDone ? prev.filter((s) => s !== index) : [...prev, index];
+      const next = wasDone ? prev.filter((questIndex) => questIndex !== index) : [...prev, index];
       localStorage.setItem(`vc_sidequests_${day}`, JSON.stringify(next));
 
-      // Award bonus XP + skill XP on completion only
-      if (!wasDone && mission) {
-        const quest = mission.sideQuests[index];
+      if (!wasDone) {
+        const quest = currentMission.sideQuests[index];
         addSkillXP(quest.skill);
 
-        const p: ProgressData = JSON.parse(localStorage.getItem("vc_progress")!);
-        const updated = { ...p, xp: p.xp + quest.xp, level: Math.floor((p.xp + quest.xp) / 100) + 1 };
-        localStorage.setItem("vc_progress", JSON.stringify(updated));
+        const storedProgress = getStoredProgress() || progress || DEFAULT_PROGRESS;
+        const newXp = storedProgress.xp + quest.xp;
+        const updated = {
+          ...storedProgress,
+          xp: newXp,
+          level: Math.floor(newXp / 100) + 1,
+        };
+
+        setStoredProgress(updated);
         setProgress(updated);
       }
 
@@ -101,29 +218,43 @@ export default function MissionPage() {
   }
 
   function completeStep(index: number) {
+    const currentMission = mission;
+    if (!currentMission) return;
+
     setCompletedSteps((prev) => {
       const next = prev.includes(index)
-        ? prev.filter((s) => s !== index)
+        ? prev.filter((stepIndex) => stepIndex !== index)
         : [...prev, index];
 
       localStorage.setItem(`vc_steps_${day}`, JSON.stringify(next));
 
-      // Award XP + skill XP
       if (!prev.includes(index)) {
-        addSkillXP(mission!.steps[index].skill);
+        addSkillXP(currentMission.steps[index].skill);
 
-        const p: ProgressData = JSON.parse(localStorage.getItem("vc_progress")!);
-        const newXp = p.xp + 20;
-        const newLevel = Math.floor(newXp / 100) + 1;
-        const updated = { ...p, xp: newXp, level: newLevel };
+        const storedProgress = getStoredProgress() || progress || DEFAULT_PROGRESS;
+        const stepXp = currentMission.steps[index].xp ?? 20;
+        let newXp = storedProgress.xp + stepXp;
 
-        // If all steps done, advance day
-        if (next.length === mission!.steps.length && p.current_day === day) {
-          updated.current_day = Math.min(day + 1, 7);
-          updated.xp += 50; // bonus XP for completing mission
+        const updated: ProgressData = {
+          ...storedProgress,
+          xp: newXp,
+          level: Math.floor(newXp / 100) + 1,
+        };
+
+        const justCompletedDay = next.length === currentMission.steps.length;
+
+        if (justCompletedDay) {
+          if (storedProgress.current_day === day) {
+            newXp += 50;
+            updated.current_day = Math.min(day + 1, 7);
+            updated.xp = newXp;
+            updated.level = Math.floor(newXp / 100) + 1;
+          }
+
+          void syncDynamicDayCompletion();
         }
 
-        localStorage.setItem("vc_progress", JSON.stringify(updated));
+        setStoredProgress(updated);
         setProgress(updated);
       }
 
@@ -133,19 +264,18 @@ export default function MissionPage() {
 
   function handleModalComplete(response: string) {
     if (modalStep === null) return;
+    const currentMission = mission;
+    if (!currentMission) return;
 
-    // Save the user's response for this step
-    const key = `vc_response_${day}_${modalStep}`;
-    localStorage.setItem(key, response);
+    const responseKey = `vc_response_${day}_${modalStep}`;
+    localStorage.setItem(responseKey, response);
 
-    // Auto-create leads from "Send to X people" steps
-    const stepKey = mission!.steps[modalStep].titleKey;
+    const stepKey = currentMission.steps[modalStep].titleKey;
     if (stepKey === "missions.day4_step4" || stepKey === "missions.day5_step5") {
       addLeadsFromStepResponse(response, day);
     }
 
     if (isEditingStep) {
-      // Editing — just update response, no XP change
       setModalStep(null);
       setIsEditingStep(false);
       return;
@@ -154,26 +284,34 @@ export default function MissionPage() {
     completeStep(modalStep);
     setModalStep(null);
 
-    // Advance active step to next incomplete
-    const nextIncomplete = mission!.steps.findIndex(
-      (_, i) => i !== modalStep && !completedSteps.includes(i)
+    const nextIncomplete = currentMission.steps.findIndex(
+      (_, index) => index !== modalStep && !completedSteps.includes(index)
     );
-    if (nextIncomplete >= 0) setActiveStep(nextIncomplete);
+    if (nextIncomplete >= 0) {
+      setActiveStep(nextIncomplete);
+    }
   }
 
   const currentStepTitle = t(mission.steps[activeStep]?.titleKey || "");
   const currentStepDesc = t(mission.steps[activeStep]?.descKey || "");
+  const relatedLessons = getLessonsForDay(day);
+  const lessonsLabel =
+    locale === "ru"
+      ? getRussianLessonLabel(relatedLessons.length, t)
+      : relatedLessons.length === 1
+        ? t("learning.lesson_one")
+        : t("learning.lesson_other");
 
-  // Gather user responses for AI context
   const userResponses: Record<string, string> = {};
-  mission.steps.forEach((step, i) => {
-    const saved = localStorage.getItem(`vc_response_${day}_${i}`);
-    if (saved) userResponses[t(step.titleKey)] = saved;
+  mission.steps.forEach((step, index) => {
+    const saved = localStorage.getItem(`vc_response_${day}_${index}`);
+    if (saved) {
+      userResponses[t(step.titleKey)] = saved;
+    }
   });
 
   return (
     <div className="mx-auto max-w-lg p-6">
-      {/* Back */}
       <Link
         href="/dashboard"
         className="mb-6 inline-flex items-center gap-1 text-sm transition-colors duration-200"
@@ -182,7 +320,6 @@ export default function MissionPage() {
         {t("common.back_dashboard")}
       </Link>
 
-      {/* Mission header */}
       <div className="mb-6">
         <div
           className="mb-2 inline-block px-2.5 py-1 text-xs font-semibold"
@@ -201,7 +338,6 @@ export default function MissionPage() {
         </p>
       </div>
 
-      {/* Progress */}
       <div className="mb-6">
         <ProgressBar
           value={completedSteps.length}
@@ -210,24 +346,54 @@ export default function MissionPage() {
         />
       </div>
 
-      {/* Completion banner */}
       {completedSteps.length === mission.steps.length && (
-        <div
-          className="mb-6 p-4 text-center"
-          style={{ background: "rgba(34,197,94,0.15)", border: "1px solid var(--success)", borderRadius: "var(--radius-lg)" }}
-        >
-          <div className="text-lg font-bold" style={{ color: "var(--success)" }}>
-            {day === 1 ? t("mission.complete_day1") : t("mission.complete_generic")} 🎉
+        <div className="mb-6 flex flex-col gap-3">
+          <div
+            className="p-4 text-center"
+            style={{
+              background: "rgba(34,197,94,0.15)",
+              border: "1px solid var(--success)",
+              borderRadius: "var(--radius-lg)",
+            }}
+          >
+            <div className="text-lg font-bold" style={{ color: "var(--success)" }}>
+              {day === 1 ? t("mission.complete_day1") : t("mission.complete_generic")} 🎉
+            </div>
+            <div className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+              {day === 1
+                ? t("mission.complete_day1_desc")
+                : t("mission.complete_generic_desc")}
+            </div>
           </div>
-          <div className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            {day === 1
-              ? t("mission.complete_day1_desc")
-              : t("mission.complete_generic_desc")}
-          </div>
+
+          <button
+            onClick={() => setShowSummary(true)}
+            className="flex w-full items-center justify-center gap-3 p-4 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
+            style={{
+              background: "linear-gradient(135deg, var(--accent), #6d28d9)",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "var(--shadow-glow)",
+            }}
+          >
+            🧠 {t("synthesis.view_artifact")}
+          </button>
+
+          <a
+            href={NEXUS_WORKSPACE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full items-center justify-center gap-3 p-4 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
+            style={{
+              background: "linear-gradient(135deg, #f97316, #ea580c)",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "0 0 20px rgba(249,115,22,0.25)",
+            }}
+          >
+            ⚡ {t("synthesis.open_workspace")}
+          </a>
         </div>
       )}
 
-      {/* Steps */}
       <h2 className="mb-3 text-lg font-semibold">{t("mission.steps")}</h2>
       <StepList
         steps={mission.steps}
@@ -238,7 +404,6 @@ export default function MissionPage() {
         activeStep={activeStep}
       />
 
-      {/* Side Quests */}
       {mission.sideQuests.length > 0 && (
         <SideQuests
           quests={mission.sideQuests}
@@ -247,8 +412,7 @@ export default function MissionPage() {
         />
       )}
 
-      {/* Related Lessons */}
-      {getLessonsForDay(day).length > 0 && (
+      {relatedLessons.length > 0 && (
         <div className="mb-6 mt-6">
           <h3 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-muted)" }}>
             📚 {t("learning.title")}
@@ -263,30 +427,35 @@ export default function MissionPage() {
             }}
           >
             <div className="flex -space-x-1">
-              {getLessonsForDay(day).slice(0, 3).map((lesson) => (
+              {relatedLessons.slice(0, 3).map((lesson) => (
                 <span key={lesson.id} className="text-base">{lesson.icon}</span>
               ))}
             </div>
             <span className="flex-1 text-xs" style={{ color: "var(--text-muted)" }}>
-              {getLessonsForDay(day).length} {getLessonsForDay(day).length === 1 ? "lesson" : "lessons"} →
+              {relatedLessons.length} {lessonsLabel} →
             </span>
           </Link>
         </div>
       )}
 
-      {/* Step completion modal */}
       {modalStep !== null && (
         <StepModal
           stepTitle={t(mission.steps[modalStep].titleKey)}
           interaction={mission.steps[modalStep].interaction}
           onComplete={handleModalComplete}
-          onCancel={() => { setModalStep(null); setIsEditingStep(false); }}
-          initialResponse={isEditingStep ? (localStorage.getItem(`vc_response_${day}_${modalStep}`) || undefined) : undefined}
+          onCancel={() => {
+            setModalStep(null);
+            setIsEditingStep(false);
+          }}
+          initialResponse={
+            isEditingStep
+              ? localStorage.getItem(`vc_response_${day}_${modalStep}`) || undefined
+              : undefined
+          }
           isEditing={isEditingStep}
         />
       )}
 
-      {/* AI Mentor */}
       <AIMentor
         missionTitle={t(mission.titleKey)}
         currentStep={currentStepTitle}
@@ -294,11 +463,57 @@ export default function MissionPage() {
         currentDay={day}
         userResponses={userResponses}
         onStepExecuted={() => {
-          // When execution mode completes, open the step modal for the active step
           setIsEditingStep(false);
           setModalStep(activeStep);
         }}
       />
+
+      {showSummary && (
+        <DaySummary
+          day={day}
+          responses={userResponses}
+          onboarding={(() => {
+            try {
+              const raw = localStorage.getItem("vc_onboarding");
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                return {
+                  goal: parsed.goal || "",
+                  experience: parsed.experience || "",
+                  timePerDay: parsed.timePerDay || "",
+                  idea: parsed.idea || "",
+                };
+              }
+            } catch {
+              return undefined;
+            }
+
+            return undefined;
+          })()}
+          onClose={() => setShowSummary(false)}
+          onOpenWorkspace={() => {
+            window.open(NEXUS_WORKSPACE_URL, "_blank");
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function getRussianLessonLabel(
+  count: number,
+  t: (key: string) => string
+): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (mod10 === 1 && mod100 !== 11) {
+    return t("learning.lesson_one");
+  }
+
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return t("learning.lesson_few");
+  }
+
+  return t("learning.lesson_many");
 }

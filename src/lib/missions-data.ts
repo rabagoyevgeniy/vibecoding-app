@@ -12,6 +12,7 @@ export interface MissionStep {
   descKey: string;
   interaction: StepInteraction;
   skill: SkillType;
+  xp?: number;
 }
 
 export interface SideQuest {

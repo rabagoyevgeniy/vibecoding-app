@@ -16,21 +16,30 @@ import { useI18n } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { getLevelTier } from "@/lib/levels";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
-
-interface ProgressData {
-  current_day: number;
-  xp: number;
-  level: number;
-}
-
-function getCompletedSteps(day: number): number[] {
-  const raw = localStorage.getItem(`vc_steps_${day}`);
-  return raw ? JSON.parse(raw) : [];
-}
+import { useAuth } from "@/lib/auth";
+import {
+  getAllPlanDays,
+  getUserPlan,
+  getUserProfile,
+  syncPlanDayStatuses,
+  type StoredPlanDay,
+} from "@/lib/plan-engine";
+import {
+  ensureStoredProgress,
+  getCompletedStepCount,
+  getStoredGoal,
+  getStoredProgress,
+  initializeProgressFromPlanDays,
+  mergeProgress,
+  setStoredGoal,
+  setStoredProgress,
+  type ProgressData,
+} from "@/lib/progress";
 
 export default function DashboardPage() {
   const router = useRouter();
   const { t } = useI18n();
+  const { user, loading } = useAuth();
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [goal, setGoal] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -38,26 +47,80 @@ export default function DashboardPage() {
   const [showShare, setShowShare] = useState(false);
   const [showCertificate, setShowCertificate] = useState(false);
   const [userName, setUserName] = useState("");
+  const [planDays, setPlanDays] = useState<StoredPlanDay[]>([]);
+  const [hasDynamicPlan, setHasDynamicPlan] = useState(false);
 
   const refreshLeads = useCallback(() => {
     setLeads(getLeads());
   }, []);
 
   useEffect(() => {
-    const g = localStorage.getItem("vc_goal");
-    const p = localStorage.getItem("vc_progress");
-    if (!g || !p) {
-      router.push("/onboarding");
-      return;
-    }
-    setGoal(g);
-    setProgress(JSON.parse(p));
-    refreshLeads();
-    setSkills(getSkills());
-    setUserName(localStorage.getItem("vc_user_name") || "");
-  }, [router, refreshLeads]);
+    if (loading) return;
 
-  if (!progress || !goal) return null;
+    async function loadData() {
+      // Try loading from Supabase if user is authenticated
+      if (user) {
+        const [profile, plan, rawDays] = await Promise.all([
+          getUserProfile(user.id),
+          getUserPlan(user.id),
+          getAllPlanDays(user.id),
+        ]);
+
+        const days = rawDays.length > 0
+          ? await syncPlanDayStatuses(user.id, rawDays)
+          : rawDays;
+
+        if (plan && days.length > 0) {
+          // Dynamic AI-generated plan
+          setHasDynamicPlan(true);
+          setPlanDays(days);
+
+          const goalFromProfile = profile?.onboarding_answers?.goal || getStoredGoal() || "money";
+          setStoredGoal(goalFromProfile);
+          setGoal(goalFromProfile);
+
+          const inferredProgress = initializeProgressFromPlanDays(days);
+          const resolvedProgress = mergeProgress(getStoredProgress(), inferredProgress);
+          setStoredProgress(resolvedProgress);
+          setProgress(resolvedProgress);
+
+          refreshLeads();
+          setSkills(getSkills());
+          setUserName(localStorage.getItem("vc_user_name") || "");
+          return;
+        }
+
+        // User authenticated but no plan yet — check if onboarding done
+        if (profile?.onboarding_completed) {
+          const goalFromProfile = profile.onboarding_answers?.goal || getStoredGoal() || "money";
+          setStoredGoal(goalFromProfile);
+          setGoal(goalFromProfile);
+          setProgress(ensureStoredProgress());
+          refreshLeads();
+          setSkills(getSkills());
+          setUserName(localStorage.getItem("vc_user_name") || "");
+          return;
+        }
+      }
+
+      // Fallback: localStorage (legacy or unauthenticated)
+      const g = getStoredGoal();
+      const p = getStoredProgress();
+      if (!g || !p) {
+        router.push("/onboarding");
+        return;
+      }
+      setGoal(g);
+      setProgress(p);
+      refreshLeads();
+      setSkills(getSkills());
+      setUserName(localStorage.getItem("vc_user_name") || "");
+    }
+
+    loadData();
+  }, [user, loading, router, refreshLeads]);
+
+  if (loading || !progress || !goal) return null;
 
   const tier = getLevelTier(progress.xp);
   const goalLabel =
@@ -65,7 +128,32 @@ export default function DashboardPage() {
       ? t("dashboard.path_money")
       : goal === "startup"
         ? t("dashboard.path_startup")
-        : t("dashboard.path_ai");
+        : goal === "ai"
+          ? t("dashboard.path_ai")
+          : t("dashboard.path_learn") || t("dashboard.path_ai");
+
+  // Build mission list from dynamic plan or fallback to static
+  const missionItems = hasDynamicPlan
+    ? planDays.map((day) => ({
+        day: day.day,
+        title: day.title,
+        description: day.description,
+        totalSteps: day.steps.length,
+        completedSteps: day.status === "completed" ? day.steps.length : getCompletedStepCount(day.day),
+        dayStatus: day.status,
+      }))
+    : MISSIONS.map((mission) => ({
+        day: mission.day,
+        title: t(mission.titleKey),
+        description: t(mission.descKey),
+        totalSteps: mission.steps.length,
+        completedSteps: getCompletedStepCount(mission.day),
+        dayStatus: undefined,
+      }));
+
+  const allDone = hasDynamicPlan
+    ? planDays.length === 7 && planDays.every((d) => d.status === "completed")
+    : getCompletedStepCount(7) === MISSIONS[6]?.steps.length;
 
   return (
     <div className="mx-auto max-w-lg p-6">
@@ -111,8 +199,29 @@ export default function DashboardPage() {
         <LevelCard xp={progress.xp} onShare={() => setShowShare(true)} />
       </div>
 
+      {/* Plan summary — shown for dynamic plans */}
+      {hasDynamicPlan && (
+        <div
+          className="mb-8 p-4"
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--accent)",
+            borderRadius: "var(--radius-lg)",
+            boxShadow: "var(--shadow-glow)",
+          }}
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-lg">🧠</span>
+            <span className="font-semibold">{t("dashboard.ai_plan") || "AI Plan"}</span>
+          </div>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            {t("dashboard.ai_plan_desc") || "Your personalized 7-day plan generated by AI"}
+          </p>
+        </div>
+      )}
+
       {/* Certificate CTA — shows after Day 7 completion */}
-      {getCompletedSteps(7).length === MISSIONS[6].steps.length && (
+      {allDone && (
         <div className="mb-8">
           {!userName ? (
             <CertificateNameInput onSubmit={(name) => {
@@ -198,26 +307,31 @@ export default function DashboardPage() {
       {/* Missions */}
       <h2 className="mb-4 text-lg font-semibold">{t("dashboard.your_missions")}</h2>
       <div className="flex flex-col gap-3">
-        {MISSIONS.map((mission) => {
-          const completed = getCompletedSteps(mission.day);
+        {missionItems.map((item) => {
           let status: "locked" | "active" | "done";
-          if (mission.day < progress.current_day) {
-            status = "done";
-          } else if (mission.day === progress.current_day) {
-            status = "active";
+          if (hasDynamicPlan && item.dayStatus) {
+            status = item.dayStatus === "completed" ? "done"
+              : item.dayStatus === "active" ? "active"
+              : "locked";
           } else {
-            status = "locked";
+            if (item.day < progress.current_day) {
+              status = "done";
+            } else if (item.day === progress.current_day) {
+              status = "active";
+            } else {
+              status = "locked";
+            }
           }
 
           return (
             <MissionCard
-              key={mission.day}
-              day={mission.day}
-              title={t(mission.titleKey)}
-              description={t(mission.descKey)}
+              key={item.day}
+              day={item.day}
+              title={item.title}
+              description={item.description}
               status={status}
-              stepsCompleted={completed.length}
-              totalSteps={mission.steps.length}
+              stepsCompleted={item.completedSteps}
+              totalSteps={item.totalSteps}
             />
           );
         })}

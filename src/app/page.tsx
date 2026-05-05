@@ -1,18 +1,32 @@
+"use client";
+
 import Link from "next/link";
 import { MatrixRain } from "@/components/MatrixRain";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
-
-const DAYS = [
-  { day: 1, title: "Find Your Idea", result: "Problem validated, offer defined" },
-  { day: 2, title: "Build Your MVP", result: "Landing page live, ready to share" },
-  { day: 3, title: "Set Up Your System", result: "Payments + booking connected" },
-  { day: 4, title: "Get Your First Client", result: "3 messages sent, first reply" },
-  { day: 5, title: "Scale Your Outreach", result: "Repeatable outreach process" },
-  { day: 6, title: "Add AI & Automate", result: "Workflows running on autopilot" },
-  { day: 7, title: "Launch & Scale", result: "Public launch, real users" },
-];
+import { useI18n } from "@/lib/i18n";
 
 export default function LandingPage() {
+  const { t } = useI18n();
+
+  const DAYS = [
+    { day: 1, title: t("landing.day1"), result: t("landing.day1_result") },
+    { day: 2, title: t("landing.day2"), result: t("landing.day2_result") },
+    { day: 3, title: t("landing.day3"), result: t("landing.day3_result") },
+    { day: 4, title: t("landing.day4"), result: t("landing.day4_result") },
+    { day: 5, title: t("landing.day5"), result: t("landing.day5_result") },
+    { day: 6, title: t("landing.day6"), result: t("landing.day6_result") },
+    { day: 7, title: t("landing.day7"), result: t("landing.day7_result") },
+  ];
+
+  const RESULTS = [
+    { icon: "💬", title: t("landing.res_clients"), desc: t("landing.res_clients_desc") },
+    { icon: "🔗", title: t("landing.res_system"), desc: t("landing.res_system_desc") },
+    { icon: "🤖", title: t("landing.res_ai"), desc: t("landing.res_ai_desc") },
+    { icon: "💰", title: t("landing.res_revenue"), desc: t("landing.res_revenue_desc") },
+    { icon: "📊", title: t("landing.res_data"), desc: t("landing.res_data_desc") },
+    { icon: "🚀", title: t("landing.res_momentum"), desc: t("landing.res_momentum_desc") },
+  ];
+
   return (
     <div
       className="relative"
@@ -34,33 +48,33 @@ export default function LandingPage() {
         </div>
 
         <div className="mb-6 inline-block rounded-full px-4 py-1.5 text-sm font-medium" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)", color: "var(--accent-light)" }}>
-          7 days. 1 business. AI-guided.
+          {t("landing.badge")}
         </div>
 
         <h1 className="mx-auto max-w-3xl text-5xl font-extrabold leading-tight tracking-tight sm:text-7xl">
-          Build your first
+          {t("landing.hero_1")}
           <br />
-          <span style={{ color: "var(--accent)" }}>AI-powered business</span>
+          <span style={{ color: "var(--accent)" }}>{t("landing.hero_2")}</span>
           <br />
-          in 7 days
+          {t("landing.hero_3")}
         </h1>
 
         <p className="mx-auto mt-6 max-w-xl text-lg" style={{ color: "var(--text-muted)" }}>
-          Stop watching tutorials. Stop planning. Start building.
+          {t("landing.sub_1")}
           <br />
-          <strong style={{ color: "var(--text)" }}>7D(AI)S</strong> gives you a daily mission, an AI mentor, and everything you need to go from zero to paying clients — in one week.
+          <strong style={{ color: "var(--text)" }}>7D(AI)S</strong> {t("landing.sub_2")}
         </p>
 
         <Link
-          href="/onboarding"
+          href="/auth"
           className="mt-10 inline-block rounded-xl px-10 py-4 text-lg font-bold text-white transition-transform hover:scale-105"
           style={{ background: "linear-gradient(135deg, var(--accent), #6d28d9)" }}
         >
-          Start Day 1 →
+          {t("landing.cta")}
         </Link>
 
         <p className="mt-4 text-sm" style={{ color: "var(--text-muted)" }}>
-          Free. No credit card. No fluff.
+          {t("landing.cta_sub")}
         </p>
 
         {/* Scroll indicator */}
@@ -72,31 +86,31 @@ export default function LandingPage() {
       {/* PROBLEM vs SOLUTION */}
       <section className="mx-auto max-w-4xl px-6 py-24">
         <h2 className="mb-12 text-center text-3xl font-bold sm:text-4xl">
-          The problem with <span style={{ color: "var(--text-muted)" }}>&quot;learning to build&quot;</span>
+          {t("landing.problem_title")} <span style={{ color: "var(--text-muted)" }}>{t("landing.problem_title_span")}</span>
         </h2>
 
         <div className="grid gap-6 sm:grid-cols-2">
           <div className="rounded-2xl p-6" style={{ background: "var(--bg-card)", border: "1px solid #2a1a1a" }}>
             <div className="mb-4 text-2xl">😩</div>
-            <h3 className="mb-3 text-lg font-bold" style={{ color: "#ef4444" }}>What most people do</h3>
+            <h3 className="mb-3 text-lg font-bold" style={{ color: "#ef4444" }}>{t("landing.problem_bad")}</h3>
             <ul className="flex flex-col gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
-              <li>Watch 47 YouTube tutorials</li>
-              <li>Buy 3 courses they never finish</li>
-              <li>Spend months &quot;preparing&quot;</li>
-              <li>Build something nobody uses</li>
-              <li>Give up and call it &quot;a learning experience&quot;</li>
+              <li>{t("landing.bad_1")}</li>
+              <li>{t("landing.bad_2")}</li>
+              <li>{t("landing.bad_3")}</li>
+              <li>{t("landing.bad_4")}</li>
+              <li>{t("landing.bad_5")}</li>
             </ul>
           </div>
 
           <div className="rounded-2xl p-6" style={{ background: "var(--bg-card)", border: "1px solid rgba(124,58,237,0.3)" }}>
             <div className="mb-4 text-2xl">⚡</div>
-            <h3 className="mb-3 text-lg font-bold" style={{ color: "var(--accent-light)" }}>What 7D(AI)S does</h3>
+            <h3 className="mb-3 text-lg font-bold" style={{ color: "var(--accent-light)" }}>{t("landing.problem_good")}</h3>
             <ul className="flex flex-col gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
-              <li>Day 1: you find and validate your idea</li>
-              <li>Day 2: you build a real MVP</li>
-              <li>Day 3: you set up payments and systems</li>
-              <li>Day 4: you reach out and get clients</li>
-              <li>Day 7: you have a running business</li>
+              <li>{t("landing.good_1")}</li>
+              <li>{t("landing.good_2")}</li>
+              <li>{t("landing.good_3")}</li>
+              <li>{t("landing.good_4")}</li>
+              <li>{t("landing.good_5")}</li>
             </ul>
           </div>
         </div>
@@ -105,12 +119,12 @@ export default function LandingPage() {
       {/* HOW IT WORKS */}
       <section className="mx-auto max-w-3xl px-6 py-24">
         <h2 className="mb-4 text-center text-3xl font-bold sm:text-4xl">
-          7 days. 7 missions.
+          {t("landing.how_title_1")}
           <br />
-          <span style={{ color: "var(--accent-light)" }}>Real results.</span>
+          <span style={{ color: "var(--accent-light)" }}>{t("landing.how_title_2")}</span>
         </h2>
         <p className="mb-12 text-center" style={{ color: "var(--text-muted)" }}>
-          Each day is a focused mission with clear steps. Complete them all and you&apos;ll have a working business by Day 7.
+          {t("landing.how_sub")}
         </p>
 
         <div className="flex flex-col gap-4">
@@ -141,18 +155,11 @@ export default function LandingPage() {
       {/* RESULTS */}
       <section className="mx-auto max-w-4xl px-6 py-24">
         <h2 className="mb-12 text-center text-3xl font-bold sm:text-4xl">
-          By Day 7, you&apos;ll have
+          {t("landing.results_title")}
         </h2>
 
         <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            { icon: "💬", title: "Clients", desc: "Real people paying for your service or product" },
-            { icon: "🔗", title: "A System", desc: "Landing page → booking → delivery — all connected" },
-            { icon: "🤖", title: "AI Tools", desc: "Automations doing the work while you sleep" },
-            { icon: "💰", title: "Revenue", desc: "Stripe connected, payments flowing in" },
-            { icon: "📊", title: "Data", desc: "You know what works, what doesn't, and what to do next" },
-            { icon: "🚀", title: "Momentum", desc: "A business that's live, not stuck in your head" },
-          ].map((item, i) => (
+          {RESULTS.map((item, i) => (
             <div
               key={i}
               className="rounded-xl p-5 text-center"
@@ -178,31 +185,31 @@ export default function LandingPage() {
           }}
         >
           <h2 className="mb-4 text-3xl font-bold sm:text-4xl">
-            Stop planning.
+            {t("landing.final_1")}
             <br />
-            <span style={{ color: "var(--accent-light)" }}>Start building.</span>
+            <span style={{ color: "var(--accent-light)" }}>{t("landing.final_2")}</span>
           </h2>
           <p className="mb-8" style={{ color: "var(--text-muted)" }}>
-            Your AI mentor is ready. Your first mission is waiting. The only thing missing is you hitting the button.
+            {t("landing.final_sub")}
           </p>
 
           <Link
-            href="/onboarding"
+            href="/auth"
             className="inline-block rounded-xl px-10 py-4 text-lg font-bold text-white transition-transform hover:scale-105"
             style={{ background: "linear-gradient(135deg, var(--accent), #6d28d9)" }}
           >
-            Start Day 1 →
+            {t("landing.cta")}
           </Link>
 
           <p className="mt-4 text-sm" style={{ color: "var(--text-muted)" }}>
-            7 days from now, you&apos;ll either have a business — or another week of &quot;I&apos;ll start tomorrow.&quot;
+            {t("landing.final_bottom")}
           </p>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="px-6 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-        7D(AI)S — Build real products with AI guidance
+        {t("landing.footer")}
       </footer>
 
       </div>{/* end z-10 wrapper */}

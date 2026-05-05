@@ -38,7 +38,14 @@ export function StepList({
               borderRadius: "var(--radius-lg)",
               boxShadow: isActive ? "var(--shadow-glow)" : "none",
             }}
-            onClick={() => onSelectStep(i)}
+            onClick={() => {
+              onSelectStep(i);
+              if (done) {
+                onEdit(i);
+              } else {
+                onToggle(i);
+              }
+            }}
           >
             <button
               onClick={(e) => {
