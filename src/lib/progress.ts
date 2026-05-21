@@ -1,3 +1,5 @@
+import { incrementXpAndCheckLevel } from "./supabase-storage";
+
 export interface ProgressData {
   current_day: number;
   xp: number;
@@ -125,4 +127,21 @@ export function mergeProgress(
     xp,
     level: Math.max(stored.level, inferred.level, Math.floor(xp / 100) + 1),
   };
+}
+
+/**
+ * Hybrid cloud XP sync helper (for mission page & other award sites).
+ * Call with void (fire-and-forget) after local progress update when user is logged in.
+ */
+export async function addXpToCloud(
+  userId: string | null | undefined,
+  amount: number
+): Promise<void> {
+  if (!userId || !Number.isFinite(amount) || amount <= 0) return;
+
+  try {
+    await incrementXpAndCheckLevel(userId, amount);
+  } catch (err) {
+    console.error("[progress] Failed to sync XP delta to Supabase:", err);
+  }
 }

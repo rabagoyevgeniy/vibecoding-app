@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { User, Session } from "@supabase/supabase-js";
+import { syncLocalStorageToSupabase } from "@/lib/supabase-storage";
 
 interface AuthContextType {
   user: User | null;
@@ -47,10 +48,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+
+      // One-time migration of local progress to Supabase on login
+      if (event === "SIGNED_IN" && session?.user?.id) {
+        void syncLocalStorageToSupabase(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();

@@ -17,6 +17,7 @@ import {
   type ProgressData,
 } from "@/lib/progress";
 import { getSkills, type SkillsData } from "@/lib/skills";
+import { fetchUserProgress } from "@/lib/supabase-storage";
 
 const EMPTY_SKILLS: SkillsData = {
   sales: 0,
@@ -45,8 +46,28 @@ export default function ProfilePage() {
 
       if (cancelled) return;
 
-      setProgress(storedProgress);
-      setSkills(getSkills());
+      // Hybrid: prefer Supabase progress/skills when user is logged in
+      if (user) {
+        const cloud = await fetchUserProgress(user.id);
+        if (cloud) {
+          setProgress({
+            current_day: cloud.current_day ?? storedProgress.current_day,
+            xp: cloud.xp ?? storedProgress.xp,
+            level: cloud.level ?? storedProgress.level,
+          });
+          if (cloud.skills) {
+            setSkills(cloud.skills as SkillsData);
+          } else {
+            setSkills(getSkills());
+          }
+        } else {
+          setProgress(storedProgress);
+          setSkills(getSkills());
+        }
+      } else {
+        setProgress(storedProgress);
+        setSkills(getSkills());
+      }
 
       if (storedGoal) {
         setGoal(storedGoal);

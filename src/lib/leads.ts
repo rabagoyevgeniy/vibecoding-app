@@ -1,3 +1,5 @@
+import { fetchLeads, saveLeads as saveLeadsToSupabase, type StoredLead } from "@/lib/supabase-storage";
+
 export type LeadStatus = "no_reply" | "replied" | "interested";
 export type LeadPlatform = "whatsapp" | "telegram" | "instagram" | "linkedin" | "twitter" | "other";
 export type LeadType = "client" | "partner" | "investor" | "developer";

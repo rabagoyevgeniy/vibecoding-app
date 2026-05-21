@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
+import { fetchArtifact, saveArtifact } from "@/lib/supabase-storage";
 
 interface ArtifactSection {
   title: string;
@@ -36,20 +38,31 @@ export function DaySummary({ day, responses, onboarding, onClose, onOpenWorkspac
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  useEffect(() => {
-    // Check if we already have a cached artifact
-    const cached = localStorage.getItem(`vc_artifact_${day}`);
-    if (cached) {
-      try {
-        setArtifact(JSON.parse(cached));
-        setLoading(false);
-        return;
-      } catch {
-        // ignore, regenerate
-      }
-    }
+  const { user } = useAuth();
 
-    async function synthesize() {
+  useEffect(() => {
+    async function loadArtifact() {
+      // 1. Try Supabase first if logged in
+      if (user?.id) {
+        const cloud = await fetchArtifact(user.id, day);
+        if (cloud) {
+          setArtifact(cloud);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 2. Fallback to localStorage cache
+      const cached = localStorage.getItem(`vc_artifact_${day}`);
+      if (cached) {
+        try {
+          setArtifact(JSON.parse(cached));
+          setLoading(false);
+          return;
+        } catch {}
+      }
+
+      // 3. Generate new
       try {
         const res = await fetch("/api/ai/synthesize", {
           method: "POST",
@@ -60,6 +73,11 @@ export function DaySummary({ day, responses, onboarding, onClose, onOpenWorkspac
         const { artifact: data } = await res.json();
         setArtifact(data);
         localStorage.setItem(`vc_artifact_${day}`, JSON.stringify(data));
+
+        // Also save to Supabase if logged in
+        if (user?.id) {
+          void saveArtifact(user.id, day, data);
+        }
       } catch {
         setError(true);
       } finally {
@@ -67,8 +85,8 @@ export function DaySummary({ day, responses, onboarding, onClose, onOpenWorkspac
       }
     }
 
-    synthesize();
-  }, [day, responses, onboarding, locale]);
+    void loadArtifact();
+  }, [day, responses, onboarding, locale, user?.id]);
 
   if (loading) {
     return (

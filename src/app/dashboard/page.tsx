@@ -7,6 +7,7 @@ import { MissionCard } from "@/components/MissionCard";
 import { LeadsList } from "@/components/LeadsList";
 import { MISSIONS } from "@/lib/missions-data";
 import { getLeads, type Lead } from "@/lib/leads";
+import { fetchLeads } from "@/lib/supabase-storage";
 import { getSkills, type SkillsData } from "@/lib/skills";
 import { SkillsCard } from "@/components/SkillsCard";
 import { LevelCard } from "@/components/LevelCard";
@@ -35,6 +36,7 @@ import {
   setStoredProgress,
   type ProgressData,
 } from "@/lib/progress";
+import { fetchUserProgress } from "@/lib/supabase-storage";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -60,15 +62,28 @@ export default function DashboardPage() {
     async function loadData() {
       // Try loading from Supabase if user is authenticated
       if (user) {
-        const [profile, plan, rawDays] = await Promise.all([
+        const [profile, plan, rawDays, cloudProgress] = await Promise.all([
           getUserProfile(user.id),
           getUserPlan(user.id),
           getAllPlanDays(user.id),
+          fetchUserProgress(user.id),
         ]);
 
         const days = rawDays.length > 0
           ? await syncPlanDayStatuses(user.id, rawDays)
           : rawDays;
+
+        // Prefer cloud progress when available (hybrid read)
+        const localP = getStoredProgress();
+        const effectiveProgress = cloudProgress
+          ? mergeProgress(cloudProgress as any, localP || undefined)
+          : localP;
+
+        if (cloudProgress?.skills) {
+          setSkills(cloudProgress.skills as any);
+        } else {
+          setSkills(getSkills());
+        }
 
         if (plan && days.length > 0) {
           // Dynamic AI-generated plan
@@ -80,12 +95,16 @@ export default function DashboardPage() {
           setGoal(goalFromProfile);
 
           const inferredProgress = initializeProgressFromPlanDays(days);
-          const resolvedProgress = mergeProgress(getStoredProgress(), inferredProgress);
+          const resolvedProgress = mergeProgress(effectiveProgress || getStoredProgress(), inferredProgress);
           setStoredProgress(resolvedProgress);
           setProgress(resolvedProgress);
 
           refreshLeads();
-          setSkills(getSkills());
+          if (user?.id) {
+            fetchLeads(user.id).then(cloudLeads => {
+              if (cloudLeads && cloudLeads.length > 0) setLeads(cloudLeads as any);
+            });
+          }
           setUserName(localStorage.getItem("vc_user_name") || "");
           return;
         }
@@ -95,9 +114,14 @@ export default function DashboardPage() {
           const goalFromProfile = profile.onboarding_answers?.goal || getStoredGoal() || "money";
           setStoredGoal(goalFromProfile);
           setGoal(goalFromProfile);
-          setProgress(ensureStoredProgress());
+
+          setProgress(effectiveProgress || ensureStoredProgress());
           refreshLeads();
-          setSkills(getSkills());
+          if (user?.id) {
+            fetchLeads(user.id).then(cloudLeads => {
+              if (cloudLeads && cloudLeads.length > 0) setLeads(cloudLeads as any);
+            });
+          }
           setUserName(localStorage.getItem("vc_user_name") || "");
           return;
         }

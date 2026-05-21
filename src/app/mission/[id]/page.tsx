@@ -23,6 +23,7 @@ import {
 } from "@/lib/plan-engine";
 import {
   DEFAULT_PROGRESS,
+  addXpToCloud,
   getCompletedSteps as getStoredCompletedSteps,
   getStoredProgress,
   initializeProgressFromPlanDays,
@@ -30,6 +31,13 @@ import {
   setStoredProgress,
   type ProgressData,
 } from "@/lib/progress";
+import {
+  saveStepResponse,
+  fetchDayResponses,
+  markStepCompleted,
+  fetchCompletedStepsForDay,
+  fetchSideQuestsForDay,
+} from "@/lib/supabase-storage";
 
 function mapPlanDayToMission(
   planDay: StoredPlanDay,
@@ -89,6 +97,9 @@ export default function MissionPage() {
   const [hasDynamicPlan, setHasDynamicPlan] = useState(false);
   const [dayStatus, setDayStatus] = useState<StoredPlanDay["status"] | null>(null);
 
+  // Hybrid responses (Supabase first + localStorage fallback)
+  const [dayResponsesMap, setDayResponsesMap] = useState<Record<number, string>>({});
+
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
   useEffect(() => {
@@ -134,6 +145,23 @@ export default function MissionPage() {
       setStoredProgress(storedProgress);
 
       const savedSteps = getStoredCompletedSteps(day);
+      const savedSideQuests = getStoredSideQuests(day);
+
+      // Hybrid load for completions
+      if (user?.id) {
+        try {
+          const [cloudSteps, cloudSide] = await Promise.all([
+            fetchCompletedStepsForDay(user.id, day),
+            fetchSideQuestsForDay(user.id, day),
+          ]);
+          // merge (union)
+          cloudSteps.forEach((s) => { if (!savedSteps.includes(s)) savedSteps.push(s); });
+          cloudSide.forEach((s) => { if (!savedSideQuests.includes(s)) savedSideQuests.push(s); });
+        } catch (e) {
+          console.error("Failed hybrid load completions", e);
+        }
+      }
+
       const firstIncomplete = resolvedMission.steps.findIndex(
         (_, index) => !savedSteps.includes(index)
       );
@@ -145,7 +173,7 @@ export default function MissionPage() {
       setDayStatus(resolvedDayStatus);
       setProgress(storedProgress);
       setCompletedSteps(savedSteps);
-      setCompletedSideQuests(getStoredSideQuests(day));
+      setCompletedSideQuests(savedSideQuests);
       setActiveStep(
         firstIncomplete >= 0
           ? firstIncomplete
@@ -159,6 +187,44 @@ export default function MissionPage() {
       cancelled = true;
     };
   }, [day, user, loading, router]);
+
+  // Hybrid load of step responses: Supabase (if logged in) + localStorage fallback
+  useEffect(() => {
+    if (!mission || loading) return;
+
+    const currentMission = mission; // capture for the async closure
+
+    async function loadHybridResponses() {
+      let responses: Record<number, string> = {};
+
+      if (user?.id) {
+        try {
+          const fromDb = await fetchDayResponses(user.id, day);
+          if (fromDb && Object.keys(fromDb).length > 0) {
+            responses = { ...fromDb };
+          }
+        } catch (err) {
+          console.error("[mission] Failed to load responses from Supabase, falling back to local", err);
+        }
+      }
+
+      // Always merge localStorage (newer local edits win, or fill gaps)
+      currentMission.steps.forEach((_, index) => {
+        if (!responses[index]) {
+          const local = typeof window !== "undefined"
+            ? localStorage.getItem(`vc_response_${day}_${index}`)
+            : null;
+          if (local) {
+            responses[index] = local;
+          }
+        }
+      });
+
+      setDayResponsesMap(responses);
+    }
+
+    void loadHybridResponses();
+  }, [user, day, mission, loading]);
 
   if (loading || !mission || !progress) return null;
 
@@ -197,6 +263,10 @@ export default function MissionPage() {
       const next = wasDone ? prev.filter((questIndex) => questIndex !== index) : [...prev, index];
       localStorage.setItem(`vc_sidequests_${day}`, JSON.stringify(next));
 
+      if (user?.id) {
+        void markStepCompleted(user.id, day, index, true);
+      }
+
       if (!wasDone) {
         const quest = currentMission.sideQuests[index];
         addSkillXP(quest.skill);
@@ -211,6 +281,11 @@ export default function MissionPage() {
 
         setStoredProgress(updated);
         setProgress(updated);
+
+        // Hybrid: push side-quest XP to Supabase
+        if (user?.id) {
+          void addXpToCloud(user.id, quest.xp);
+        }
       }
 
       return next;
@@ -227,6 +302,10 @@ export default function MissionPage() {
         : [...prev, index];
 
       localStorage.setItem(`vc_steps_${day}`, JSON.stringify(next));
+
+      if (user?.id) {
+        void markStepCompleted(user.id, day, index, false);
+      }
 
       if (!prev.includes(index)) {
         addSkillXP(currentMission.steps[index].skill);
@@ -256,6 +335,12 @@ export default function MissionPage() {
 
         setStoredProgress(updated);
         setProgress(updated);
+
+        // Hybrid: push the awarded XP (step + optional day bonus) to Supabase cloud
+        if (user?.id) {
+          const delta = justCompletedDay ? stepXp + 50 : stepXp;
+          void addXpToCloud(user.id, delta);
+        }
       }
 
       return next;
@@ -269,6 +354,14 @@ export default function MissionPage() {
 
     const responseKey = `vc_response_${day}_${modalStep}`;
     localStorage.setItem(responseKey, response);
+
+    // Hybrid Supabase save (primary for logged-in users)
+    if (user?.id) {
+      void saveStepResponse(user.id, day, modalStep, response);
+    }
+
+    // Update in-memory map so UI (DaySummary, AIMentor, re-edits) sees it immediately
+    setDayResponsesMap((prev) => ({ ...prev, [modalStep]: response }));
 
     const stepKey = currentMission.steps[modalStep].titleKey;
     if (stepKey === "missions.day4_step4" || stepKey === "missions.day5_step5") {
@@ -304,7 +397,7 @@ export default function MissionPage() {
 
   const userResponses: Record<string, string> = {};
   mission.steps.forEach((step, index) => {
-    const saved = localStorage.getItem(`vc_response_${day}_${index}`);
+    const saved = dayResponsesMap[index];
     if (saved) {
       userResponses[t(step.titleKey)] = saved;
     }
@@ -449,7 +542,7 @@ export default function MissionPage() {
           }}
           initialResponse={
             isEditingStep
-              ? localStorage.getItem(`vc_response_${day}_${modalStep}`) || undefined
+              ? dayResponsesMap[modalStep]
               : undefined
           }
           isEditing={isEditingStep}
