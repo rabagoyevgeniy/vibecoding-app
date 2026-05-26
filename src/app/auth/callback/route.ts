@@ -4,38 +4,61 @@ import { createClient } from "@/lib/supabase-server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/onboarding";
+  // Default to dashboard for returning users; onboarding will catch new ones
+  const next = searchParams.get("next") ?? "/dashboard";
 
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      // Check if user has a vc_profile (completed onboarding)
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (user) {
-        // Robust check: support both legacy VIEW (vc_profiles) and real table (user_profiles)
-        // Checks onboarding_completed (VIEW), onboarding_data, or onboarding_answers (non-empty)
-        const { data: profile } = await supabase
-          .from("vc_profiles")
-          .select("onboarding_completed, onboarding_data, onboarding_answers")
-          .eq("user_id", user.id)
-          .single();
+        // Robust check for existing onboarding (supports VIEW + real table)
+        let hasOnboarding = false;
 
-        const hasOnboarding =
-          profile?.onboarding_completed === true ||
-          (profile?.onboarding_data && Object.keys(profile.onboarding_data).length > 0) ||
-          (profile?.onboarding_answers && Object.keys(profile.onboarding_answers).length > 0);
+        try {
+          // Try real table first
+          const { data: userProfile } = await supabase
+            .from("user_profiles")
+            .select("onboarding_data, onboarding_answers")
+            .eq("user_id", user.id)
+            .single();
+
+          if (userProfile && ((userProfile.onboarding_data && Object.keys(userProfile.onboarding_data).length > 0) || 
+              (userProfile.onboarding_answers && Object.keys(userProfile.onboarding_answers).length > 0))) {
+            hasOnboarding = true;
+          } else {
+            // Fallback to VIEW
+            const { data: vcProfile } = await supabase
+              .from("vc_profiles")
+              .select("onboarding_completed, onboarding_data, onboarding_answers")
+              .eq("user_id", user.id)
+              .single();
+
+            hasOnboarding =
+              vcProfile?.onboarding_completed === true ||
+              (vcProfile?.onboarding_data && Object.keys(vcProfile.onboarding_data).length > 0) ||
+              (vcProfile?.onboarding_answers && Object.keys(vcProfile.onboarding_answers).length > 0);
+          }
+        } catch (e) {
+          // No profile row yet → treat as new user
+          hasOnboarding = false;
+        }
 
         if (hasOnboarding) {
-          // Already onboarded → dashboard (ignore default onboarding redirect)
+          // Returning user with completed onboarding → dashboard + projects
           return NextResponse.redirect(`${origin}/dashboard`);
+        } else {
+          // New Google user (or incomplete) → force onboarding to initialize profile + AI plan
+          return NextResponse.redirect(`${origin}/onboarding`);
         }
       }
 
+      // Fallback
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
