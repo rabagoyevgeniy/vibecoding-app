@@ -262,3 +262,69 @@ FROM public.user_profiles;
 -- Legacy direct upserts in src/app/onboarding/page.tsx will be replaced
 -- by calls to the supabase-storage helpers (see Phase 1 plan below).
 -- The RLS policies on user_profiles continue to protect all access.
+
+-- ============================================================================
+-- 10. NEXUS SESSIONS (AI Agent State Persistence)
+-- Purpose: Persist generated plans and actions across page refreshes.
+-- Allows NexusEngine to survive F5 / navigation while keeping in-memory speed.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.vc_nexus_sessions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  day int NOT NULL CHECK (day BETWEEN 1 AND 7),
+  actions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'failed')),
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, day)
+);
+
+ALTER TABLE public.vc_nexus_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own Nexus sessions"
+  ON public.vc_nexus_sessions
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Reuse existing updated_at trigger function
+CREATE TRIGGER vc_nexus_sessions_updated_at 
+  BEFORE UPDATE ON public.vc_nexus_sessions 
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_updated_at();
+
+CREATE INDEX idx_vc_nexus_sessions_user_day ON public.vc_nexus_sessions(user_id, day);
+
+-- ============================================================================
+-- RLS HARDENING MIGRATION (for user_progress upsert issues)
+-- Run this in Supabase SQL Editor if you still see saveUserProgress errors after deploy.
+-- The original single "FOR ALL" policy can be flaky with PostgREST upserts + new rows.
+-- Granular policies (select / insert / update) are the recommended pattern.
+-- ============================================================================
+
+-- 1. Drop the broad policy if it exists (safe if not)
+DROP POLICY IF EXISTS "Users can modify their own data" ON public.user_progress;
+
+-- 2. Create explicit policies (allows authenticated user to fully manage ONLY their row)
+CREATE POLICY "user_progress_select_own"
+  ON public.user_progress
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "user_progress_insert_own"
+  ON public.user_progress
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "user_progress_update_own"
+  ON public.user_progress
+  FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- (Optional but recommended) Same hardening for other progress-related tables:
+-- DROP POLICY IF EXISTS "Users can modify their own data" ON public.user_step_responses;
+-- ... (repeat pattern for user_step_responses, user_artifacts, user_leads, vc_plans etc. if needed)
+
+-- After running, new users doing syncLocalStorageToSupabase or incrementXp will succeed.

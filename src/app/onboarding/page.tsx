@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -9,6 +9,7 @@ import { generateAndSavePlan } from "@/lib/plan-engine";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
 import { DEFAULT_PROGRESS, getStoredProgress, setStoredGoal, setStoredProgress } from "@/lib/progress";
+import { hasCompletedOnboarding } from "@/lib/supabase-storage";
 
 const TOTAL_STEPS = 5;
 
@@ -42,10 +43,23 @@ const TIME_OPTIONS: { id: TimePerDay; emoji: string }[] = [
   { id: "5h+", emoji: "💪" },
 ];
 
+// Helper for AI idea suggestions (based on collected data)
+function generateIdeaSuggestions(goal: Goal | null, experience: Experience | null, time: TimePerDay | null): string[] {
+  const base = goal === "money" ? "монетизация" : goal === "startup" ? "масштабируемый стартап" : goal === "ai" ? "AI-продукт" : "обучение";
+  const skill = experience === "beginner" ? "для новичков" : "с использованием твоего опыта";
+  const effort = time === "1-2h" ? "в свободное время" : "как основной проект";
+
+  return [
+    `Платформа для ${base} ${skill} ${effort} (идея 1)`,
+    `AI-инструмент для ${base} с фокусом на ${skill} ${effort} (идея 2)`,
+    `Сервис по ${base} для целевой аудитории ${skill} ${effort} (идея 3)`,
+  ];
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const { t, locale: language } = useI18n();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<OnboardingData>({
@@ -54,6 +68,18 @@ export default function OnboardingPage() {
     timePerDay: null,
     idea: "",
   });
+
+  // Client-side guard: prevent already-onboarded users from accessing /onboarding directly
+  useEffect(() => {
+    if (authLoading || !user?.id) return;
+
+    (async () => {
+      const completed = await hasCompletedOnboarding(user.id);
+      if (completed) {
+        router.replace("/dashboard");
+      }
+    })();
+  }, [user?.id, authLoading, router]);
 
   const canNext =
     (step === 1 && data.goal !== null) ||
@@ -73,17 +99,18 @@ export default function OnboardingPage() {
 
       if (user) {
         const supabase = createClient();
-        // Upsert vc_profiles with onboarding data
-        await supabase.from("vc_profiles").upsert(
+        // IMPORTANT: Write to the real base table (user_profiles) using the correct column.
+        // vc_profiles is a read-only compatibility VIEW. Writing to it does not persist.
+        // This ensures onboarding_completed (derived in VIEW) becomes true on next login.
+        await supabase.from("user_profiles").upsert(
           {
             user_id: user.id,
-            onboarding_answers: {
+            onboarding_data: {
               goal: data.goal,
               experience: data.experience,
               time_per_day: data.timePerDay,
               idea: data.idea || null,
             },
-            onboarding_completed: true,
           },
           { onConflict: "user_id" }
         );
@@ -337,8 +364,16 @@ export default function OnboardingPage() {
               }
             />
             <button
-              onClick={() => setData({ ...data, idea: "" })}
-              className="mt-3 text-sm underline"
+              onClick={() => {
+                // AI-powered idea suggestions based on collected data (goal, experience, time)
+                const suggestions = generateIdeaSuggestions(data.goal, data.experience, data.timePerDay);
+                // For demo, set the first suggestion or show list
+                // In real, could open a modal with 3 options or call /api/ai
+                setData({ ...data, idea: suggestions[0] });
+                // TODO: Show modal with all 3 suggestions for user to choose
+                alert(`Предложенные идеи:\n1. ${suggestions[0]}\n2. ${suggestions[1]}\n3. ${suggestions[2]}\n\n(В продакшене здесь будет красивый выбор или вызов ИИ)`);
+              }}
+              className="mt-3 text-sm underline hover:text-[var(--accent)] transition-colors"
               style={{ color: "var(--accent-light)" }}
             >
               {t("onboarding.idea_skip")}

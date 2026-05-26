@@ -118,10 +118,17 @@ export async function saveUserProgress(
       .upsert(payload, { onConflict: "user_id" });
 
     if (error) {
-      console.error("[supabase-storage] saveUserProgress failed:", error);
+      // Improved logging: PostgrestError often has .message; stringify as fallback so we never see empty {}
+      console.error(
+        "[supabase-storage] saveUserProgress failed:",
+        error?.message || JSON.stringify(error) || error
+      );
     }
   } catch (err) {
-    console.error("[supabase-storage] saveUserProgress exception:", err);
+    console.error(
+      "[supabase-storage] saveUserProgress exception:",
+      (err as any)?.message || JSON.stringify(err) || err
+    );
   }
 }
 
@@ -575,5 +582,33 @@ export async function saveArtifact(
     }
   } catch (err) {
     console.error("[supabase-storage] saveArtifact exception:", err);
+  }
+}
+
+/**
+ * Client-side helper: returns true if the user has already completed onboarding.
+ * Used for guards (e.g. prevent re-visiting /onboarding after finishing it).
+ * Checks both the legacy VIEW fields and the real onboarding_data.
+ */
+export async function hasCompletedOnboarding(userId: string): Promise<boolean> {
+  if (!isValidUserId(userId)) return false;
+
+  try {
+    const { data } = await supabase
+      .from("vc_profiles")
+      .select("onboarding_completed, onboarding_data, onboarding_answers")
+      .eq("user_id", userId)
+      .single();
+
+    if (!data) return false;
+
+    return !!(
+      data.onboarding_completed === true ||
+      (data.onboarding_data && Object.keys(data.onboarding_data).length > 0) ||
+      (data.onboarding_answers && Object.keys(data.onboarding_answers).length > 0)
+    );
+  } catch {
+    // On any error (RLS, network, no row) we treat as "not completed" so user can still onboard
+    return false;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { MISSIONS, type Mission } from "@/lib/missions-data";
@@ -9,6 +9,8 @@ import { StepModal } from "@/components/StepModal";
 import { SideQuests } from "@/components/SideQuests";
 import { ProgressBar } from "@/components/ProgressBar";
 import { AIMentor } from "@/components/AIMentor";
+import { ArtifactPreviewModal } from "@/components/ArtifactPreviewModal";
+import { SqlPreviewModal } from "@/components/SqlPreviewModal";
 import { useI18n } from "@/lib/i18n";
 import { addLeadsFromStepResponse } from "@/lib/leads";
 import { addSkillXP } from "@/lib/skills";
@@ -38,6 +40,7 @@ import {
   fetchCompletedStepsForDay,
   fetchSideQuestsForDay,
 } from "@/lib/supabase-storage";
+import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
 
 function mapPlanDayToMission(
   planDay: StoredPlanDay,
@@ -99,6 +102,12 @@ export default function MissionPage() {
 
   // Hybrid responses (Supabase first + localStorage fallback)
   const [dayResponsesMap, setDayResponsesMap] = useState<Record<number, string>>({});
+
+  // Workspace Artifact Previews (independent of AIMentor collapse)
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewSql, setPreviewSql] = useState<string | null>(null);
+  const [isSqlPreviewOpen, setIsSqlPreviewOpen] = useState(false);
 
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
@@ -225,6 +234,64 @@ export default function MissionPage() {
 
     void loadHybridResponses();
   }, [user, day, mission, loading]);
+
+  // Nexus v2.0 — encapsulated in custom hook (clean separation of concerns)
+  const {
+    nexusActions,
+    isGeneratingPlan,
+    handleGenerateNexusPlan,
+    handleNexusExecute,
+    handleNexusApprove,
+  } = useMissionNexus(user?.id, day);
+
+  // Focus Mode: hide mission steps when AI agent is active (gives 100% attention to the terminal)
+  const [showMissionSteps, setShowMissionSteps] = useState(true);
+  const isAgentActive = (nexusActions && nexusActions.length > 0) || isGeneratingPlan;
+
+  // Auto-collapse steps when agent becomes active (better focus on reasoning log)
+  useEffect(() => {
+    if (isAgentActive) {
+      setShowMissionSteps(false);
+    }
+  }, [isAgentActive]);
+
+  // === Workspace Artifact Helpers (independent of AIMentor) ===
+  const openArtifactPreview = (html: string) => {
+    setPreviewHtml(html);
+    setIsPreviewOpen(true);
+  };
+
+  const openSqlPreview = (sql: string) => {
+    setPreviewSql(sql);
+    setIsSqlPreviewOpen(true);
+  };
+
+  // Completed artifacts from Nexus (persisted across page visits)
+  const completedArtifacts = useMemo(() => {
+    if (!nexusActions || nexusActions.length === 0) return [];
+
+    return nexusActions
+      .filter((action) => action.status === 'completed' && (action.result?.html || action.result?.sql))
+      .map((action) => ({
+        id: action.id,
+        toolName: action.toolName,
+        result: action.result || {},
+        projectName: action.result?.project || (action.input as any)?.project_name || null,
+      }));
+  }, [nexusActions]);
+
+  const userResponses = useMemo(() => {
+    // Safety: if mission not loaded yet, return empty object (prevents crash in downstream components)
+    if (!mission || !mission.steps) return {};
+    const responses: Record<string, string> = {};
+    mission.steps.forEach((step, index) => {
+      const saved = dayResponsesMap[index];
+      if (saved) {
+        responses[t(step.titleKey)] = saved;
+      }
+    });
+    return responses;
+  }, [mission?.steps, dayResponsesMap, t]);
 
   if (loading || !mission || !progress) return null;
 
@@ -395,16 +462,9 @@ export default function MissionPage() {
         ? t("learning.lesson_one")
         : t("learning.lesson_other");
 
-  const userResponses: Record<string, string> = {};
-  mission.steps.forEach((step, index) => {
-    const saved = dayResponsesMap[index];
-    if (saved) {
-      userResponses[t(step.titleKey)] = saved;
-    }
-  });
-
   return (
-    <div className="mx-auto max-w-lg p-6">
+    <div className="mx-auto max-w-3xl px-4 pb-8">
+      {/* Single-Plane Layout (Telegram Mini App / AppFather style) */}
       <Link
         href="/dashboard"
         className="mb-6 inline-flex items-center gap-1 text-sm transition-colors duration-200"
@@ -428,6 +488,32 @@ export default function MissionPage() {
         <h1 className="mb-2 text-2xl font-bold tracking-tight">{t(mission.titleKey)}</h1>
         <p className="text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>
           {t(mission.descKey)}
+        </p>
+
+        {/* Nexus AI Plan Button - Premium CTA */}
+        <button
+          onClick={handleGenerateNexusPlan}
+          disabled={isGeneratingPlan || !user}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-all active:scale-[0.985] disabled:opacity-60"
+          style={{
+            background: "linear-gradient(135deg, var(--accent), #6d28d9)",
+            color: "white",
+            borderColor: "var(--accent)",
+            boxShadow: "0 4px 14px 0 rgba(109, 40, 217, 0.25)",
+          }}
+        >
+          {isGeneratingPlan ? (
+            <>
+              <span className="animate-spin">⟳</span> Генерирую ИИ-план Nexus...
+            </>
+          ) : (
+            <>
+              🤖 Сгенерировать ИИ-план Nexus
+            </>
+          )}
+        </button>
+        <p className="mt-1 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>
+          Получи персональный план действий от Claude
         </p>
       </div>
 
@@ -487,22 +573,49 @@ export default function MissionPage() {
         </div>
       )}
 
-      <h2 className="mb-3 text-lg font-semibold">{t("mission.steps")}</h2>
-      <StepList
-        steps={mission.steps}
-        completedSteps={completedSteps}
-        onToggle={handleToggle}
-        onEdit={handleEdit}
-        onSelectStep={setActiveStep}
-        activeStep={activeStep}
-      />
+      {/* Focus Mode: Hide mission steps when AI agent is active to give 100% attention to the Terminal */}
+      {showMissionSteps ? (
+        <>
+          <h2 className="mb-3 text-lg font-semibold">{t("mission.steps")}</h2>
+          <StepList
+            steps={mission.steps}
+            completedSteps={completedSteps}
+            onToggle={handleToggle}
+            onEdit={handleEdit}
+            onSelectStep={setActiveStep}
+            activeStep={activeStep}
+          />
 
-      {mission.sideQuests.length > 0 && (
-        <SideQuests
-          quests={mission.sideQuests}
-          completedQuests={completedSideQuests}
-          onToggle={handleSideQuestToggle}
-        />
+          {mission.sideQuests.length > 0 && (
+            <SideQuests
+              quests={mission.sideQuests}
+              completedQuests={completedSideQuests}
+              onToggle={handleSideQuestToggle}
+            />
+          )}
+
+          {isAgentActive && (
+            <button
+              onClick={() => setShowMissionSteps(false)}
+              className="mt-2 w-full py-2 text-xs font-medium rounded-lg border transition hover:bg-white/5"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              📋 Свернуть шаги миссии (фокус на агенте)
+            </button>
+          )}
+        </>
+      ) : (
+        <button
+          onClick={() => setShowMissionSteps(true)}
+          className="mb-4 w-full py-2 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition active:scale-[0.985]"
+          style={{ 
+            borderColor: 'var(--accent)', 
+            color: 'var(--accent)',
+            background: 'rgba(124, 58, 237, 0.08)'
+          }}
+        >
+          📋 Развернуть шаги миссии
+        </button>
       )}
 
       {relatedLessons.length > 0 && (
@@ -549,6 +662,7 @@ export default function MissionPage() {
         />
       )}
 
+      {/* Monolithic AIMentor (Agent Terminal) - right after mission steps in single-plane flow */}
       <AIMentor
         missionTitle={t(mission.titleKey)}
         currentStep={currentStepTitle}
@@ -559,7 +673,87 @@ export default function MissionPage() {
           setIsEditingStep(false);
           setModalStep(activeStep);
         }}
+        nexusPlan={nexusActions}
+        onNexusExecute={handleNexusExecute}
+        onNexusApprove={handleNexusApprove}
+        onGeneratePlan={handleGenerateNexusPlan}
       />
+
+      {/* === Workspace Artifacts: Visible Results (independent of AIMentor collapse) === */}
+      {completedArtifacts.length > 0 && (
+        <div className="mb-8">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-xl">🚀</span>
+            <h3 className="text-lg font-semibold">Сгенерированные артефакты</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--bg-elevated)", color: "var(--text-muted)" }}>
+              День {day}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {completedArtifacts.map((artifact) => {
+              const isLanding = artifact.toolName === 'site_layout_builder' && artifact.result.html;
+              const isDatabase = artifact.toolName === 'database_schema_builder' && artifact.result.sql;
+
+              if (isLanding) {
+                return (
+                  <div
+                    key={artifact.id}
+                    className="p-5 rounded-2xl border transition hover:border-[var(--accent)]/50"
+                    style={{ background: "var(--bg-card)", borderColor: "var(--border)" }}
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="text-3xl">🖥️</div>
+                      <div>
+                        <div className="font-semibold">Готовый Лендинг</div>
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          Tailwind • Конверсионная посадочная страница
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => openArtifactPreview(artifact.result.html!)}
+                      className="w-full mt-2 py-2.5 text-sm font-semibold rounded-xl transition active:scale-[0.985]"
+                      style={{ background: "var(--accent)", color: "white" }}
+                    >
+                      👁️ Открыть превью сайта
+                    </button>
+                  </div>
+                );
+              }
+
+              if (isDatabase) {
+                return (
+                  <div
+                    key={artifact.id}
+                    className="p-5 rounded-2xl border transition hover:border-[var(--accent)]/50"
+                    style={{ background: "var(--bg-card)", borderColor: "var(--border)" }}
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="text-3xl">🗄️</div>
+                      <div>
+                        <div className="font-semibold">Архитектура Базы Данных</div>
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          {artifact.projectName ? `${artifact.projectName} • ` : ""}Supabase PostgreSQL + RLS
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => openSqlPreview(artifact.result.sql!)}
+                      className="w-full mt-2 py-2.5 text-sm font-semibold rounded-xl transition active:scale-[0.985]"
+                      style={{ background: "#0ea5e9", color: "white" }}
+                    >
+                      💻 Посмотреть SQL-скрипт
+                    </button>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+          </div>
+        </div>
+      )}
 
       {showSummary && (
         <DaySummary
@@ -589,6 +783,27 @@ export default function MissionPage() {
           }}
         />
       )}
+
+      {/* Artifact Preview Modals (global for the mission page) */}
+      <ArtifactPreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => {
+          setIsPreviewOpen(false);
+          setPreviewHtml(null);
+        }}
+        html={previewHtml}
+        title="Готовый лендинг"
+      />
+
+      <SqlPreviewModal
+        isOpen={isSqlPreviewOpen}
+        onClose={() => {
+          setIsSqlPreviewOpen(false);
+          setPreviewSql(null);
+        }}
+        sql={previewSql}
+        title="Сгенерированная SQL-схема"
+      />
     </div>
   );
 }

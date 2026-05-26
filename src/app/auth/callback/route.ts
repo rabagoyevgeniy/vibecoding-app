@@ -17,14 +17,21 @@ export async function GET(request: Request) {
       } = await supabase.auth.getUser();
 
       if (user) {
+        // Robust check: support both legacy VIEW (vc_profiles) and real table (user_profiles)
+        // Checks onboarding_completed (VIEW), onboarding_data, or onboarding_answers (non-empty)
         const { data: profile } = await supabase
           .from("vc_profiles")
-          .select("onboarding_completed")
+          .select("onboarding_completed, onboarding_data, onboarding_answers")
           .eq("user_id", user.id)
           .single();
 
-        // If onboarding is already completed, go to dashboard
-        if (profile?.onboarding_completed) {
+        const hasOnboarding =
+          profile?.onboarding_completed === true ||
+          (profile?.onboarding_data && Object.keys(profile.onboarding_data).length > 0) ||
+          (profile?.onboarding_answers && Object.keys(profile.onboarding_answers).length > 0);
+
+        if (hasOnboarding) {
+          // Already onboarded → dashboard (ignore default onboarding redirect)
           return NextResponse.redirect(`${origin}/dashboard`);
         }
       }

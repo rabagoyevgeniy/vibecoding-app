@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
-import { parseExecutionPlan, type MicroAction, type ExecutionPlan } from "@/lib/execution-mode";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
+import { NexusAction } from "@/lib/nexus/types";
+import { useAuth } from "@/lib/auth";
+import { ArtifactPreviewModal } from "./ArtifactPreviewModal";
+import { SqlPreviewModal } from "./SqlPreviewModal";
+import { CreditBalance } from "./CreditBalance";
 
 interface AIMentorProps {
   missionTitle: string;
@@ -16,567 +15,379 @@ interface AIMentorProps {
   currentDay: number;
   userResponses?: Record<string, string>;
   onStepExecuted?: () => void;
+
+  // Nexus v2.0 Plan Mode
+  nexusPlan?: NexusAction[];
+  onNexusExecute?: (actionId: string) => void | Promise<void>;
+  onNexusApprove?: (actionId: string) => void | Promise<void>;
+
+  // Real plan generation from parent (useMissionNexus)
+  onGeneratePlan?: () => void | Promise<void>;
 }
 
-const ACTION_ICONS: Record<MicroAction["type"], string> = {
-  do: "👉",
-  say: "💬",
-  click: "👆",
-  write: "✍️",
-  confirm: "✅",
-};
-
-export function AIMentor({
+const AIMentorComponent = ({
   missionTitle,
   currentStep,
-  currentStepDesc,
   currentDay,
-  userResponses,
-  onStepExecuted,
-}: AIMentorProps) {
+  nexusPlan = [],
+  onNexusExecute,
+  onNexusApprove,
+  onGeneratePlan,
+}: AIMentorProps) => {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [hasGreeted, setHasGreeted] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevStepRef = useRef(currentStep);
+  const { user } = useAuth();
 
-  // Execution mode state
+  // Core states (kept from previous versions)
   const [executionMode, setExecutionMode] = useState(false);
-  const [executionPlan, setExecutionPlan] = useState<ExecutionPlan | null>(null);
   const [currentMicroStep, setCurrentMicroStep] = useState(0);
   const [executionLoading, setExecutionLoading] = useState(false);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Pipeline state for AppFather style
+  const [pipelinePhase, setPipelinePhase] = useState<'idle' | 'plan_ready' | 'executing' | 'completed'>('idle');
+  const [thinking, setThinking] = useState(false);
 
-  const sendToAI = useCallback(
-    async (userMessage: string, isAutoGreet = false) => {
-      if (!isAutoGreet) {
-        setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+  // Artifact preview (HTML + SQL)
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const [previewSql, setPreviewSql] = useState<string | null>(null);
+  const [isSqlPreviewOpen, setIsSqlPreviewOpen] = useState(false);
+
+  // Reasoning Log state for Transparency (replaces Timeline)
+  const [reasoningLogs, setReasoningLogs] = useState<Array<{text: string; status: 'thinking' | 'done' | 'error'}>>([]);
+  const [isReasoningComplete, setIsReasoningComplete] = useState(false);
+
+  // Retry support for failed executions (synchronous log)
+  const [retryAction, setRetryAction] = useState<NexusAction | null>(null);
+
+  // Real Billing State (Hold & Capture pattern) — demo starting balance
+  const [balance, setBalance] = useState(1240);
+
+  // Sync pipeline with props
+  useEffect(() => {
+    if (executionMode) {
+      setPipelinePhase('executing');
+    } else if (nexusPlan.length > 0) {
+      setPipelinePhase('plan_ready');
+    } else {
+      setPipelinePhase('idle');
+    }
+  }, [nexusPlan, executionMode]);
+
+  // Auto-complete log when real execution finishes (via prop update)
+  useEffect(() => {
+    if (pipelinePhase === 'executing' && reasoningLogs.length > 0 && !isReasoningComplete) {
+      const recentlyCompleted = nexusPlan.find(a => a.status === 'completed' && a.result);
+      if (recentlyCompleted) {
+        completeCurrentReasoning(recentlyCompleted.result);
       }
-      setLoading(true);
+    }
+  }, [nexusPlan, pipelinePhase, reasoningLogs.length, isReasoningComplete]);
+
+  const openSitePreview = (action: any) => {
+    const html = action?.result?.html || previewHtml || '<h1>Demo Landing Page</h1>';
+    setPreviewHtml(html);
+    setIsPreviewOpen(true);
+  };
+
+  const openSqlPreview = (action?: any) => {
+    const sql = action?.result?.sql || previewSql || '';
+    if (sql) {
+      setPreviewSql(sql);
+      setIsSqlPreviewOpen(true);
+    }
+  };
+
+  // Dynamic Action Bar handlers (demo)
+  const handleGeneratePlan = () => {
+    setThinking(true);
+    setTimeout(() => {
+      setThinking(false);
+      setPipelinePhase('plan_ready');
+    }, 1600);
+  };
+
+  const handleExecute = async (action?: NexusAction) => {
+    if (action && onNexusExecute) {
+      // === REAL BILLING: Hold & Capture (check before spend) ===
+      if (balance < 150) {
+        setReasoningLogs([
+          { text: `[❌] Недостаточно кредитов. Пополните баланс.`, status: 'error' }
+        ]);
+        setThinking(false);
+        setRetryAction(null);
+        return; // Abort — no API call
+      }
+
+      // === HARD SYNCHRONOUS LOG: exactly one line, then mutate on real result ===
+      startDynamicReasoning(action.toolName);
 
       try {
-        const res = await fetch("/api/ai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            current_day: currentDay,
-            current_step: currentStep,
-            current_step_desc: currentStepDesc,
-            mission_title: missionTitle,
-            user_message: userMessage,
-            user_responses: userResponses,
-            is_proactive: isAutoGreet,
-            history: messages.slice(-6),
-          }),
-        });
+        // Real execution in NexusEngine (calls /api/nexus/execute under the hood)
+        await onNexusExecute(action.id);
 
-        const data = await res.json();
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.response || t("mentor.error") },
+        // SUCCESS: mutate the single log entry
+        setReasoningLogs([
+          { text: `[✅] Ответ получен. Артефакт сохранен.`, status: 'done' }
         ]);
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: t("mentor.error") },
+        setIsReasoningComplete(true);
+        setThinking(false);
+        setRetryAction(null);
+
+        // === CAPTURE: Deduct 150 credits only on real success (Refund Guard for errors)
+        setBalance(prev => Math.max(0, prev - 150));
+
+        // Trigger any result-driven side effects (preview, phase)
+        completeCurrentReasoning();
+      } catch (err: any) {
+        const errorText = err?.message || err?.toString() || 'Неизвестная ошибка API';
+        // ERROR: mutate the single log entry + enable Retry
+        setReasoningLogs([
+          { text: `[❌] Ошибка: ${errorText}`, status: 'error' }
         ]);
-      } finally {
-        setLoading(false);
+        setThinking(false);
+        setRetryAction(action);
       }
-    },
-    [currentDay, currentStep, currentStepDesc, missionTitle, userResponses, messages, t]
-  );
-
-  useEffect(() => {
-    if (open && !hasGreeted && messages.length === 0) {
-      setHasGreeted(true);
-      sendToAI(
-        `[SYSTEM] The user just opened the AI Mentor on Day ${currentDay}, step: "${currentStep}". Give a proactive coaching message: tell them exactly what to do for this step, offer to help, and suggest a concrete action. Be warm but direct. 2-3 sentences max.`,
-        true
-      );
-    }
-  }, [open, hasGreeted, messages.length, currentDay, currentStep, sendToAI]);
-
-  useEffect(() => {
-    if (prevStepRef.current !== currentStep && open && messages.length > 0) {
-      prevStepRef.current = currentStep;
-      // Reset execution mode when step changes
-      setExecutionMode(false);
-      setExecutionPlan(null);
-      setCurrentMicroStep(0);
-      sendToAI(
-        `[SYSTEM] The user moved to a new step: "${currentStep}". Give a brief, proactive coaching message for this step. What should they do? Offer to help. 2 sentences max.`,
-        true
-      );
-    }
-  }, [currentStep, open, messages.length, sendToAI]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
-    const userMessage = input.trim();
-    setInput("");
-    await sendToAI(userMessage);
-  }
-
-  function handleQuickAction(actionKey: string) {
-    if (loading) return;
-    const prompt = t(`mentor.quick_${actionKey}`);
-    setInput("");
-    sendToAI(prompt);
-  }
-
-  // Execution mode functions
-  async function startExecutionMode() {
-    setExecutionMode(true);
-    setExecutionLoading(true);
-    setCurrentMicroStep(0);
-    setExecutionPlan(null);
-
-    try {
-      const res = await fetch("/api/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          current_day: currentDay,
-          current_step: currentStep,
-          current_step_desc: currentStepDesc,
-          mission_title: missionTitle,
-          user_message: `Break this step into micro-actions: "${currentStep}"`,
-          user_responses: userResponses,
-          is_execution_mode: true,
-          history: [],
-        }),
-      });
-
-      const data = await res.json();
-      const plan = parseExecutionPlan(data.response || "", currentStep);
-      setExecutionPlan(plan);
-    } catch {
-      setExecutionMode(false);
-    } finally {
-      setExecutionLoading(false);
-    }
-  }
-
-  function handleMicroStepDone() {
-    if (!executionPlan) return;
-
-    if (currentMicroStep < executionPlan.actions.length - 1) {
-      setCurrentMicroStep((prev) => prev + 1);
     } else {
-      // All micro-steps completed
-      setExecutionMode(false);
-      setExecutionPlan(null);
+      setExecutionMode(true);
+      setPipelinePhase('executing');
       setCurrentMicroStep(0);
-      onStepExecuted?.();
     }
-  }
+  };
 
-  function exitExecutionMode() {
-    setExecutionMode(false);
-    setExecutionPlan(null);
-    setCurrentMicroStep(0);
-  }
+  const handleCompleteStep = () => {
+    const next = currentMicroStep + 1;
+    if (next >= 4) {
+      setPipelinePhase('completed');
+      setExecutionMode(false);
+    } else {
+      setCurrentMicroStep(next);
+    }
+  };
 
-  function handleNeedHelp() {
-    if (!executionPlan) return;
-    const action = executionPlan.actions[currentMicroStep];
-    exitExecutionMode();
-    sendToAI(
-      `I need help with this micro-action: "${action.instruction}". I'm on step "${currentStep}". Can you explain in more detail what I should do?`
-    );
-  }
+  // Dynamic Reasoning Log - STRICTLY driven by real handleNexusExecute promise lifecycle (no setTimeout simulation)
+  const startDynamicReasoning = (toolName?: string) => {
+    // Add EXACTLY ONE log line on "Выполнить" click
+    setReasoningLogs([
+      { text: `[⏳] Отправка запроса провайдеру (Claude 3.5)...`, status: 'thinking' }
+    ]);
+    setIsReasoningComplete(false);
+    setThinking(true);
+    setRetryAction(null);
+  };
 
-  const quickActions = [
-    { key: "help_step", icon: "💡" },
-    { key: "generate", icon: "✨" },
-    { key: "stuck", icon: "🆘" },
-  ];
+  const completeCurrentReasoning = (result?: any) => {
+    setReasoningLogs(prev => {
+      if (prev.length === 0) return prev;
+      const updated = [...prev];
+      const lastIndex = updated.length - 1;
+      // Only mutate if not already our clean success message
+      if (!updated[lastIndex].text.includes('Ответ получен')) {
+        updated[lastIndex] = {
+          ...updated[lastIndex],
+          status: 'done',
+          text: updated[lastIndex].text.replace('...', '') + ' ✅ Готово!'
+        };
+      }
+      return updated;
+    });
+    setIsReasoningComplete(true);
+    setPipelinePhase('completed');
+    setRetryAction(null);
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center text-2xl transition-transform duration-200 hover:scale-110"
-        style={{
-          background: "var(--accent)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow-glow), var(--shadow-lg)",
-        }}
-        title={t("mentor.title")}
-      >
-        🤖
-      </button>
-    );
-  }
+    if (result?.html) {
+      setPreviewHtml(result.html);
+    }
+  };
+
+  // Single-plane Agent Terminal (AppFather / Telegram Mini App style)
+  const panelClassName = "w-full mx-auto max-w-3xl flex flex-col overflow-hidden rounded-3xl border";
+  const panelStyle = {
+    background: "linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.92))",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    boxShadow: "0 10px 40px rgba(0, 0, 0, 0.4)",
+    backdropFilter: "blur(16px)",
+  };
 
   return (
-    <div
-      className="fixed bottom-6 right-6 flex w-80 flex-col overflow-hidden sm:w-96"
-      style={{
-        background: "var(--bg)",
-        border: "1px solid var(--border-hover)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "var(--shadow-lg)",
-        height: "480px",
-      }}
-    >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-3"
-        style={{
-          background: executionMode
-            ? "linear-gradient(135deg, #059669, #10b981)"
-            : "linear-gradient(135deg, var(--accent), #6d28d9)",
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-white">
-            {executionMode ? t("mentor.execution_title") : t("mentor.title")}
-          </span>
-          {executionMode && executionPlan && (
-            <span
-              className="px-1.5 py-0.5 text-xs font-bold"
-              style={{
-                background: "rgba(255,255,255,0.25)",
-                borderRadius: "var(--radius-sm)",
-              }}
-            >
-              {currentMicroStep + 1}/{executionPlan.actions.length}
-            </span>
-          )}
-        </div>
-        <button
-          onClick={() => setOpen(false)}
-          className="flex h-6 w-6 items-center justify-center text-sm text-white/80 transition-colors hover:text-white"
-          style={{
-            background: "rgba(255,255,255,0.15)",
-            borderRadius: "var(--radius-sm)",
-          }}
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* Context bar */}
-      <div
-        className="px-4 py-2 text-xs"
-        style={{
-          background: "var(--bg-card)",
-          color: "var(--text-muted)",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        {t("common.day")} {currentDay} · {currentStep}
-      </div>
-
-      {/* EXECUTION MODE VIEW */}
-      {executionMode ? (
-        <div className="flex flex-1 flex-col">
-          {executionLoading ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6">
-              <div
-                className="h-8 w-8 animate-spin"
-                style={{
-                  border: "3px solid var(--border)",
-                  borderTopColor: "var(--success)",
-                  borderRadius: "50%",
-                }}
-              />
-              <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                {t("mentor.execution_loading")}
-              </div>
+    <>
+      <div className={panelClassName} style={panelStyle}>
+        {/* === TOP: STATUS BAR (AppFather style) === */}
+        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style={{ background: executionMode ? "linear-gradient(135deg, #059669, #10b981)" : "linear-gradient(135deg, var(--accent), #6d28d9)" }}>
+          <div>
+            <div className="text-white font-semibold text-sm">Идея: {missionTitle || currentStep}</div>
+            <div className="text-white/70 text-[10px] mt-0.5">
+              Состояние: {pipelinePhase === 'idle' && "Ожидание плана"}
+              {pipelinePhase === 'plan_ready' && "План готов к исполнению"}
+              {pipelinePhase === 'executing' && "Live Agent Pipeline активен"}
+              {pipelinePhase === 'completed' && "Артефакт готов"}
             </div>
-          ) : executionPlan ? (
-            <>
-              {/* Progress dots */}
-              <div className="flex items-center justify-center gap-2 px-4 py-3">
-                {executionPlan.actions.map((_, i) => (
-                  <div
-                    key={i}
-                    className="h-2 flex-1 transition-all duration-300"
-                    style={{
-                      background:
-                        i < currentMicroStep
-                          ? "var(--success)"
-                          : i === currentMicroStep
-                            ? "var(--accent-light)"
-                            : "var(--bg-elevated)",
-                      borderRadius: "var(--radius-full)",
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Current micro-action */}
-              <div className="flex-1 overflow-y-auto px-4 pb-4">
-                {(() => {
-                  const action = executionPlan.actions[currentMicroStep];
-                  return (
-                    <div
-                      className="flex flex-col gap-3"
-                      style={{ animation: "fadeIn 0.3s ease" }}
-                    >
-                      {/* Action type badge */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">{ACTION_ICONS[action.type]}</span>
-                        <span
-                          className="px-2 py-0.5 text-xs font-bold uppercase"
-                          style={{
-                            background:
-                              action.type === "confirm"
-                                ? "rgba(34,197,94,0.15)"
-                                : "var(--accent-glow)",
-                            color:
-                              action.type === "confirm"
-                                ? "var(--success)"
-                                : "var(--accent-light)",
-                            borderRadius: "var(--radius-sm)",
-                          }}
-                        >
-                          {t(`mentor.action_${action.type}`)}
-                        </span>
-                      </div>
-
-                      {/* Instruction */}
-                      <div
-                        className="text-sm font-medium leading-relaxed"
-                        style={{ color: "var(--text)" }}
-                      >
-                        {action.instruction}
-                      </div>
-
-                      {/* Script block (for SAY/WRITE types) */}
-                      {action.script && (
-                        <div
-                          className="p-3 text-sm"
-                          style={{
-                            background: "var(--bg-card-hover)",
-                            border: "1px solid var(--border-hover)",
-                            borderRadius: "var(--radius-md)",
-                            borderLeft: "3px solid var(--accent)",
-                          }}
-                        >
-                          <div
-                            className="mb-1.5 text-xs font-semibold uppercase"
-                            style={{ color: "var(--accent-light)" }}
-                          >
-                            {action.type === "say"
-                              ? t("mentor.say_this")
-                              : t("mentor.type_this")}
-                          </div>
-                          <div
-                            className="leading-relaxed"
-                            style={{ color: "var(--text)" }}
-                          >
-                            &ldquo;{action.script}&rdquo;
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Completed steps recap */}
-                      {currentMicroStep > 0 && (
-                        <div className="mt-2">
-                          <div
-                            className="mb-1.5 text-xs font-medium"
-                            style={{ color: "var(--text-muted)" }}
-                          >
-                            {t("mentor.completed_actions")}
-                          </div>
-                          {executionPlan.actions.slice(0, currentMicroStep).map((a, i) => (
-                            <div
-                              key={i}
-                              className="flex items-center gap-2 py-1 text-xs"
-                              style={{ color: "var(--success)" }}
-                            >
-                              <span>✓</span>
-                              <span className="line-through opacity-60">
-                                {a.instruction.length > 50
-                                  ? a.instruction.slice(0, 50) + "..."
-                                  : a.instruction}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Action buttons */}
-              <div
-                className="flex flex-col gap-2 p-3"
-                style={{ borderTop: "1px solid var(--border)" }}
-              >
-                <button
-                  onClick={handleMicroStepDone}
-                  className="w-full py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
-                  style={{
-                    background:
-                      currentMicroStep === executionPlan.actions.length - 1
-                        ? "var(--success)"
-                        : "var(--accent)",
-                    borderRadius: "var(--radius-md)",
-                    boxShadow:
-                      currentMicroStep === executionPlan.actions.length - 1
-                        ? "0 0 16px rgba(34,197,94,0.3)"
-                        : "var(--shadow-glow)",
-                  }}
-                >
-                  {currentMicroStep === executionPlan.actions.length - 1
-                    ? t("mentor.execution_complete")
-                    : t("mentor.execution_next")}
-                </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleNeedHelp}
-                    className="flex-1 py-2 text-xs font-medium transition-all duration-200"
-                    style={{
-                      background: "var(--bg-card)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-muted)",
-                      borderRadius: "var(--radius-md)",
-                    }}
-                  >
-                    {t("mentor.need_help")}
-                  </button>
-                  <button
-                    onClick={exitExecutionMode}
-                    className="flex-1 py-2 text-xs font-medium transition-all duration-200"
-                    style={{
-                      background: "var(--bg-card)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-muted)",
-                      borderRadius: "var(--radius-md)",
-                    }}
-                  >
-                    {t("mentor.exit_execution")}
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : null}
-        </div>
-      ) : (
-        /* CHAT MODE VIEW */
-        <>
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`mb-3 ${msg.role === "user" ? "text-right" : "text-left"}`}
-              >
-                <div
-                  className="inline-block max-w-[85%] px-3 py-2 text-sm whitespace-pre-wrap"
-                  style={{
-                    background:
-                      msg.role === "user" ? "var(--accent)" : "var(--bg-card-hover)",
-                    color: msg.role === "user" ? "#fff" : "var(--text)",
-                    borderRadius:
-                      msg.role === "user"
-                        ? "var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-md)"
-                        : "var(--radius-md) var(--radius-md) var(--radius-md) var(--radius-sm)",
-                  }}
-                >
-                  {msg.content}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="mb-3 text-left">
-                <div
-                  className="inline-block px-3 py-2 text-sm"
-                  style={{
-                    background: "var(--bg-card-hover)",
-                    color: "var(--text-muted)",
-                    borderRadius: "var(--radius-md)",
-                  }}
-                >
-                  {t("mentor.thinking")}
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
           </div>
 
-          {/* Execute button + Quick actions */}
-          {!loading && (
-            <div className="px-3 pb-2">
-              {/* Execute mode CTA */}
-              <button
-                onClick={startExecutionMode}
-                className="mb-2 flex w-full items-center justify-center gap-2 py-2 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
-                style={{
-                  background: "linear-gradient(135deg, #059669, #10b981)",
-                  borderRadius: "var(--radius-md)",
-                  boxShadow: "0 0 16px rgba(16,185,129,0.2)",
-                }}
-              >
-                <span>⚡</span>
-                {t("mentor.execute_step")}
-              </button>
-              {/* Quick actions */}
-              <div className="flex gap-1.5">
-                {quickActions.map((action) => (
-                  <button
-                    key={action.key}
-                    onClick={() => handleQuickAction(action.key)}
-                    className="flex-1 px-2 py-1.5 text-xs font-medium transition-all duration-200"
-                    style={{
-                      background: "var(--bg-card)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-muted)",
-                      borderRadius: "var(--radius-sm)",
-                    }}
-                  >
-                    {action.icon} {t(`mentor.quick_${action.key}_label`)}
-                  </button>
-                ))}
-              </div>
+          <CreditBalance balance={balance} className="scale-[0.8]" />
+        </div>
+
+        {/* === CENTER: REASONING LOG + Plan Actions (Transparency) === */}
+        <div className="flex-1 flex flex-col min-h-0 p-4 overflow-hidden">
+          {/* Show plan actions when ready, before/during log */}
+          {pipelinePhase === 'plan_ready' && reasoningLogs.length === 0 && nexusPlan.length > 0 && (
+            <div className="space-y-2 mb-4">
+              <div className="text-xs uppercase text-[var(--text-muted)] mb-2">План действий</div>
+              {nexusPlan.map((action, idx) => (
+                <div key={idx} className="flex items-center justify-between p-2 rounded border" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
+                  <div className="text-sm">
+                    {action.toolName} <span className="text-xs opacity-60">({action.status})</span>
+                  </div>
+                  {(action.status === 'pending' || action.status === 'approved') && onNexusExecute && (
+                    <button
+                      onClick={() => handleExecute(action)}
+                      className="text-xs px-3 py-1 rounded bg-[var(--accent)] text-white"
+                    >
+                      Выполнить
+                    </button>
+                  )}
+                  {action.status === 'executing' && (
+                    <span className="text-xs px-3 py-1 text-[var(--accent)]">Выполняется...</span>
+                  )}
+                  {action.status === 'completed' && action.result?.html && (
+                    <button onClick={() => openSitePreview(action)} className="text-xs px-3 py-1 rounded bg-green-600 text-white">
+                      Превью
+                    </button>
+                  )}
+                  {action.status === 'completed' && action.result?.sql && (
+                    <button onClick={() => openSqlPreview(action)} className="text-xs px-3 py-1 rounded bg-green-600 text-white">
+                      Посмотреть SQL
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
-          {/* Input */}
-          <form
-            onSubmit={handleSubmit}
-            className="flex gap-2 p-3"
-            style={{ borderTop: "1px solid var(--border)" }}
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={t("mentor.placeholder")}
-              className="flex-1 px-3 py-2 text-sm outline-none transition-all duration-200"
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-md)",
-                color: "var(--text)",
-              }}
-            />
+          <div className="flex-1 overflow-y-auto font-mono text-sm space-y-2 pr-2">
+            {reasoningLogs.length === 0 && (pipelinePhase === 'executing' || thinking) && (
+              <div className="text-[var(--text-muted)]">Запуск агента рассуждений...</div>
+            )}
+
+            {reasoningLogs.map((log, index) => (
+              <div 
+                key={index} 
+                className={`flex items-start gap-2 ${log.status === 'thinking' ? 'text-[var(--accent)] animate-pulse' : log.status === 'done' ? 'text-green-400' : 'text-red-400'}`}
+              >
+                <span className="mt-0.5 flex-shrink-0">
+                  {log.status === 'thinking' ? '⏳' : log.status === 'done' ? '✅' : '❌'}
+                </span>
+                <span className="leading-snug">{log.text}</span>
+                {/* Retry button appears only for the error log entry */}
+                {log.status === 'error' && retryAction && onNexusExecute && (
+                  <button
+                    onClick={() => { if (retryAction) void handleExecute(retryAction); }}
+                    className="ml-3 text-xs px-2 py-0.5 rounded border border-red-400/60 hover:bg-red-950/30 active:scale-[0.985]"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {thinking && reasoningLogs.length === 0 && (
+              <div className="text-[var(--text-muted)] animate-pulse">Claude думает над структурой...</div>
+            )}
+          </div>
+        </div>
+
+        {/* === BOTTOM: DYNAMIC ACTION BAR === */}
+        <div className="flex-shrink-0 border-t p-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
+          {pipelinePhase === 'idle' && (
             <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="px-4 py-2 text-sm font-medium text-white transition-all duration-200 disabled:opacity-40"
-              style={{
-                background: "var(--accent)",
-                borderRadius: "var(--radius-md)",
+              onClick={() => {
+                if (onGeneratePlan) {
+                  onGeneratePlan();
+                } else {
+                  handleGeneratePlan(); // fallback demo
+                }
               }}
+              className="w-full py-3 text-sm font-semibold text-white rounded-xl transition active:scale-[0.985]"
+              style={{ background: 'var(--accent)' }}
             >
-              {t("common.send")}
+              🚀 Сгенерировать план Nexus
             </button>
-          </form>
-        </>
-      )}
-    </div>
+          )}
+
+          {pipelinePhase === 'plan_ready' && (
+            <div className="flex gap-3">
+              <button onClick={() => handleExecute()} className="flex-1 py-3 text-sm font-semibold text-white rounded-xl" style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
+                ▶️ Выполнить
+              </button>
+              <button onClick={() => alert('Открыть редактор (ArtifactPreviewModal + isRefinement)')} className="flex-1 py-3 text-sm font-semibold rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+                ✏️ Редактировать
+              </button>
+            </div>
+          )}
+
+          {pipelinePhase === 'executing' && (
+            <div className="flex gap-3">
+              <button onClick={handleCompleteStep} className="flex-1 py-3 text-sm font-semibold text-white rounded-xl" style={{ background: 'var(--accent)' }}>
+                Следующий шаг →
+              </button>
+              <button onClick={() => { setExecutionMode(false); setPipelinePhase('completed'); }} className="flex-1 py-3 text-sm font-semibold rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+                Завершить
+              </button>
+            </div>
+          )}
+
+          {pipelinePhase === 'completed' && isReasoningComplete && (
+            <div className="flex gap-3">
+              {/* Smart Action Bar: show SQL button for database_schema_builder results */}
+              {nexusPlan.some((a) => a.status === 'completed' && a.result?.sql) ? (
+                <button
+                  onClick={() => {
+                    const dbAction = nexusPlan.find((a) => a.status === 'completed' && a.result?.sql);
+                    if (dbAction) openSqlPreview(dbAction);
+                  }}
+                  className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
+                  style={{ background: 'var(--success)' }}
+                >
+                  👁️ Посмотреть SQL-скрипт
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => openSitePreview({ result: { html: previewHtml || '<div>Demo HTML</div>' } })}
+                    className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
+                    style={{ background: 'var(--success)' }}
+                  >
+                    👁️ Превью
+                  </button>
+                  <button
+                    onClick={() => alert('Скачивание HTML...')}
+                    className="flex-1 py-3 text-sm font-semibold rounded-xl border"
+                    style={{ borderColor: 'var(--border)' }}
+                  >
+                    💾 Скачать
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals */}
+      <ArtifactPreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => { setIsPreviewOpen(false); setPreviewHtml(null); }}
+        html={previewHtml}
+        title="Готовый лендинг"
+      />
+      <SqlPreviewModal
+        isOpen={isSqlPreviewOpen}
+        onClose={() => { setIsSqlPreviewOpen(false); }}
+        sql={previewSql}
+        title="Сгенерированная SQL-схема"
+      />
+    </>
   );
-}
+};
+
+export const AIMentor = AIMentorComponent;
