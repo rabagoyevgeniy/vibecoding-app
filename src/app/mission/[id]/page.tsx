@@ -185,6 +185,7 @@ export default function MissionPage() {
 
   const [smartQuests, setSmartQuests] = useState<SmartQuest[]>([]);
   const [smartQuestsLoading, setSmartQuestsLoading] = useState(true);
+  const [smartQuestsReloadKey, setSmartQuestsReloadKey] = useState(0);
 
   // Vision Help (ai_vision_help): какой квест прямо сейчас анализируется
   // и какие подсказки уже получены от AI-наставника. Прокидываются в карточку
@@ -410,7 +411,7 @@ export default function MissionPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, day]);
+  }, [user?.id, day, smartQuestsReloadKey]);
 
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
@@ -538,6 +539,10 @@ export default function MissionPage() {
     void loadHybridResponses();
   }, [user, day, mission, loading]);
 
+  const handleNexusPlanGenerated = useCallback(() => {
+    setSmartQuestsReloadKey((k) => k + 1);
+  }, []);
+
   // Nexus v2.0 — encapsulated in custom hook (clean separation of concerns)
   const {
     nexusActions,
@@ -545,7 +550,9 @@ export default function MissionPage() {
     handleGenerateNexusPlan,
     handleNexusExecute,
     handleNexusApprove,
-  } = useMissionNexus(user?.id, day);
+  } = useMissionNexus(user?.id, day, {
+    onPlanGenerated: handleNexusPlanGenerated,
+  });
 
   // Focus Mode: hide mission steps when AI agent is active (gives 100% attention to the terminal)
   const [showMissionSteps, setShowMissionSteps] = useState(true);

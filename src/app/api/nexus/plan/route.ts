@@ -3,12 +3,62 @@ import Anthropic from '@anthropic-ai/sdk';
 import { nexusEngine } from '@/lib/nexus';
 import { createClient } from '@/lib/supabase-server';
 import { guardApiRoute } from '@/lib/auth-guard';
-import type { NexusAction, NexusToolResult } from '@/lib/nexus/types';
+import type { NexusAction } from '@/lib/nexus/types';
+import {
+  buildDemoSmartQuests,
+  buildSmartQuestsFromPlan,
+  persistSmartQuestsForDay,
+  resolveProjectIdFromProfile,
+} from '@/lib/nexus/persist-smart-quests';
+import { mapSmartQuestRow } from '@/lib/smart-quests';
 
 // Initialize Anthropic client safely on the server
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
+
+function normalizeMissionDay(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 1 || n > 7) return 1;
+  return Math.floor(n);
+}
+
+async function finalizePlanResponse(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  day: number,
+  actions: NexusAction[],
+  options: {
+    finalPrompt: string;
+    isDemo: boolean;
+    projectId: string | null;
+  }
+) {
+  const questRows = options.isDemo
+    ? buildDemoSmartQuests(userId, day, options.projectId)
+    : buildSmartQuestsFromPlan(
+        userId,
+        day,
+        actions,
+        options.finalPrompt,
+        options.projectId
+      );
+
+  const { inserted, quests } = await persistSmartQuestsForDay(
+    supabase,
+    userId,
+    day,
+    questRows
+  );
+
+  const smartQuests = quests.map(mapSmartQuestRow);
+
+  return NextResponse.json({
+    actions,
+    smartQuests,
+    smartQuestsInserted: inserted,
+  });
+}
 
 export async function POST(request: NextRequest) {
   const guard = await guardApiRoute();
@@ -22,6 +72,8 @@ export async function POST(request: NextRequest) {
     // Тело сохраняем как fallback на случай, если фронтенд для отладки прислал
     // тот же id (он должен совпасть с серверным), но это не источник истины.
     const userId = guard.user.id;
+    const missionDay = normalizeMissionDay(currentDay);
+
     if (requestedUserId && requestedUserId !== userId) {
       return NextResponse.json(
         { error: 'userId mismatch with session' },
@@ -36,6 +88,7 @@ export async function POST(request: NextRequest) {
 
     // === DEEP CONTEXT INJECTION ===
     const supabase = await createClient();
+    const projectIdFromProfile = await resolveProjectIdFromProfile(supabase, userId);
     let deepContext = '';
 
     try {
@@ -206,7 +259,11 @@ Your job is to help the user progress by calling the most relevant registered to
         },
       ];
 
-      return NextResponse.json({ actions: demoActions });
+      return finalizePlanResponse(supabase, userId, missionDay, demoActions, {
+        finalPrompt,
+        isDemo: true,
+        projectId: projectIdFromProfile,
+      });
     }
 
     // If no tools were called, fall back to a basic action for the main tool
@@ -222,7 +279,11 @@ Your job is to help the user progress by calling the most relevant registered to
       });
     }
 
-    return NextResponse.json({ actions });
+    return finalizePlanResponse(supabase, userId, missionDay, actions, {
+      finalPrompt,
+      isDemo: false,
+      projectId: projectIdFromProfile,
+    });
   } catch (error: any) {
     console.error('[Nexus API] Error generating plan:', error);
     return NextResponse.json(

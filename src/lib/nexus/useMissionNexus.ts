@@ -24,9 +24,15 @@ export interface UseMissionNexusReturn {
   handleNexusApprove: (actionId: string) => Promise<void>;
 }
 
+export interface UseMissionNexusOptions {
+  /** Вызывается после успешной генерации плана (квесты сохранены в Supabase). */
+  onPlanGenerated?: () => void;
+}
+
 export function useMissionNexus(
   userId: string | undefined,
-  day: number
+  day: number,
+  options?: UseMissionNexusOptions
 ): UseMissionNexusReturn {
   const [nexusActions, setNexusActions] = useState<NexusAction[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -71,12 +77,13 @@ export function useMissionNexus(
         day
       );
       setNexusActions(actions);
+      options?.onPlanGenerated?.();
     } catch (e) {
       console.error('[useMissionNexus] Nexus plan generation failed', e);
     } finally {
       setIsGeneratingPlan(false);
     }
-  }, [userId, day]);
+  }, [userId, day, options?.onPlanGenerated]);
 
   const handleNexusExecute = useCallback(async (actionId: string) => {
     if (!userId) return;
