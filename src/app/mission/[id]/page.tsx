@@ -44,7 +44,10 @@ import {
 import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
 import { SmartQuestCard, type SmartQuest } from "@/components/quests/SmartQuestCard";
 import { verifyQuest } from "@/actions/verifyQuest";
+import { completeQuest } from "@/actions/completeQuest";
 import { analyzeScreenshot, type QuestContext } from "@/actions/analyzeScreenshot";
+import { createClient } from "@/lib/supabase-browser";
+import { mapSmartQuestRow, type SmartQuestRow } from "@/lib/smart-quests";
 import { toast } from "sonner";
 
 /**
@@ -113,39 +116,6 @@ async function compressImage(file: File): Promise<string> {
   }
 }
 
-// Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
-// Эти данные временно захардкожены, пока не подключим выборку из таблицы `smart_quests` (Supabase).
-const SMART_QUESTS_PREVIEW: SmartQuest[] = [
-  {
-    id: "preview-ai-auto",
-    title: "AI-команда поднимает Next.js + Supabase для школы плавания",
-    description:
-      "Техническая команда сама создаст репозиторий, развернёт фронт и базу. От тебя — только финальное одобрение.",
-    execution_type: "ai_auto",
-    status: "running",
-  },
-  {
-    id: "preview-user-action",
-    title: "Подключи Stripe для приёма оплат за абонементы",
-    description:
-      "Зайди в dashboard.stripe.com → Developers → API keys и вставь сюда secret key. AI проверит ключ и завершит шаг.",
-    execution_type: "user_action",
-    input_label: "Stripe Secret Key",
-    input_placeholder: "sk_live_...",
-  },
-  {
-    id: "preview-vision",
-    title: "Включи Row Level Security для таблицы bookings",
-    description:
-      "Нужно перейти в Authentication → Policies, выбрать таблицу bookings " +
-      "и нажать Enable RLS, чтобы клиенты школы плавания не могли видеть чужие записи.",
-    execution_type: "ai_vision_help",
-    // В реальной БД сюда придёт `smart_quests.project_id`. Пока — демо-значение,
-    // чтобы AI Vision реально подставлял его в deep-link'и.
-    project_id: "demo-swim-school-abc123",
-  },
-];
-
 function mapPlanDayToMission(
   planDay: StoredPlanDay,
   fallbackMission?: Mission
@@ -213,11 +183,8 @@ export default function MissionPage() {
   const [previewSql, setPreviewSql] = useState<string | null>(null);
   const [isSqlPreviewOpen, setIsSqlPreviewOpen] = useState(false);
 
-  // Smart Quests (preview): локальное состояние "завершён", чтобы карточка визуально
-  // переключалась в зелёный success-режим сразу после успешной проверки AI-командой.
-  const [completedQuestIds, setCompletedQuestIds] = useState<Set<string>>(
-    () => new Set<string>()
-  );
+  const [smartQuests, setSmartQuests] = useState<SmartQuest[]>([]);
+  const [smartQuestsLoading, setSmartQuestsLoading] = useState(true);
 
   // Vision Help (ai_vision_help): какой квест прямо сейчас анализируется
   // и какие подсказки уже получены от AI-наставника. Прокидываются в карточку
@@ -229,43 +196,75 @@ export default function MissionPage() {
     () => new Set<string>()
   );
 
+  const applyQuestCompletion = useCallback(
+    (quest: SmartQuest, xpAwarded: number, current_xp: number, new_level: number) => {
+      setSmartQuests((prev) =>
+        prev.map((q) => (q.id === quest.id ? quest : q))
+      );
+
+      if (xpAwarded > 0) {
+        const stored = getStoredProgress() || DEFAULT_PROGRESS;
+        const updated: ProgressData = {
+          ...stored,
+          xp: current_xp,
+          level: new_level,
+        };
+        setStoredProgress(updated);
+        setProgress(updated);
+      }
+    },
+    []
+  );
+
   const handleQuestUserSubmit = useCallback(
     async (questId: string, value: string) => {
-      // Оптимистичный toast «AI проверяет...» с автоматическим обновлением до success/error.
       const toastId = toast.loading("AI-команда проверяет ввод...");
 
       try {
         const result = await verifyQuest(questId, value);
 
-        if (result.success) {
-          toast.success(result.message, {
-            id: toastId,
-            description: "Шаг отмечен как завершённый.",
-            duration: 4500,
-          });
-          setCompletedQuestIds((prev) => {
-            const next = new Set(prev);
-            next.add(questId);
-            return next;
-          });
-        } else {
+        if (!result.success) {
           toast.error(result.error, {
             id: toastId,
             description: "Попробуй ещё раз. AI ждёт корректный формат.",
             duration: 5000,
           });
-          // Пробрасываем, чтобы SmartQuestCard остался в не-success состоянии.
           throw new Error(result.error);
         }
+
+        const saved = await completeQuest(questId, { result: value });
+        if (!saved.success) {
+          toast.error(saved.error, {
+            id: toastId,
+            description: "Проверка прошла, но прогресс не сохранился.",
+            duration: 5000,
+          });
+          throw new Error(saved.error);
+        }
+
+        applyQuestCompletion(
+          saved.quest,
+          saved.xpAwarded,
+          saved.current_xp,
+          saved.new_level
+        );
+
+        toast.success(result.message, {
+          id: toastId,
+          description:
+            saved.xpAwarded > 0
+              ? `+${saved.xpAwarded} XP • шаг сохранён в базе.`
+              : "Шаг отмечен как завершённый.",
+          duration: 4500,
+        });
       } catch (err) {
-        // Сетевые ошибки и проч. (verifyQuest уже сам кидает на бизнес-ошибках выше).
         if (!(err instanceof Error) || !err.message) {
           toast.error("Не удалось связаться с AI-командой.", { id: toastId });
         }
         throw err;
       }
     },
-    []
+    [applyQuestCompletion]
   );
 
   const handleQuestScreenshotUpload = useCallback(
@@ -310,12 +309,33 @@ export default function MissionPage() {
         );
 
         if (result.success) {
+          const saved = await completeQuest(questId, { result: result.analysis });
+          if (!saved.success) {
+            toast.error(saved.error, {
+              id: toastId,
+              description: "Подсказка получена, но прогресс не сохранился.",
+              duration: 5000,
+            });
+            setFailedAnalysisIds((prev) => {
+              const next = new Set(prev);
+              next.add(questId);
+              return next;
+            });
+            return;
+          }
+
+          applyQuestCompletion(
+            saved.quest,
+            saved.xpAwarded,
+            saved.current_xp,
+            saved.new_level
+          );
+
           toast.success("AI-наставник нашёл подсказку", {
             id: toastId,
             description: result.analysis,
             duration: 9000,
           });
-          setQuestAnalysis((prev) => ({ ...prev, [questId]: result.analysis }));
         } else {
           toast.error(result.error, {
             id: toastId,
@@ -347,8 +367,50 @@ export default function MissionPage() {
         setAnalyzingQuestId((current) => (current === questId ? null : current));
       }
     },
-    []
+    [applyQuestCompletion]
   );
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId || !Number.isFinite(day) || day < 1 || day > 7) {
+      setSmartQuests([]);
+      setSmartQuestsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const supabase = createClient();
+
+    async function loadSmartQuests() {
+      setSmartQuestsLoading(true);
+
+      const { data, error } = await supabase
+        .from("smart_quests")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("day", day)
+        .order("order_index", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("[mission] load smart_quests failed:", error);
+        setSmartQuests([]);
+      } else {
+        setSmartQuests(
+          (data as SmartQuestRow[] | null)?.map(mapSmartQuestRow) ?? []
+        );
+      }
+
+      setSmartQuestsLoading(false);
+    }
+
+    void loadSmartQuests();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, day]);
 
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
@@ -817,20 +879,10 @@ export default function MissionPage() {
       {/* Focus Mode: Hide mission steps when AI agent is active to give 100% attention to the Terminal */}
       {showMissionSteps ? (
         <>
-          {/* === Smart Quests (preview нового ядра продукта) === */}
+          {/* === Smart Quests (из Supabase `smart_quests`) === */}
           <div className="mb-6">
             <div className="mb-3 flex items-center gap-2">
               <h2 className="text-lg font-semibold">Smart Quests</h2>
-              <span
-                className="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                style={{
-                  background: "var(--accent-glow)",
-                  borderColor: "var(--accent)",
-                  color: "var(--accent-light)",
-                }}
-              >
-                preview
-              </span>
             </div>
             <p
               className="mb-3 text-xs leading-relaxed"
@@ -838,23 +890,30 @@ export default function MissionPage() {
             >
               Ты — CEO. AI-команда выполняет техническую работу. Подтверждай ключевые решения, давай ключи и принимай результат.
             </p>
+            {smartQuestsLoading ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                Загружаем квесты дня…
+              </p>
+            ) : smartQuests.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                Для этого дня пока нет Smart Quests. Сгенерируй ИИ-план Nexus или вернись позже.
+              </p>
+            ) : (
             <div className="flex flex-col gap-3">
-              {SMART_QUESTS_PREVIEW.map((quest) => {
-                // Собираем "живое" состояние квеста из всех источников state выше.
-                const isDone = completedQuestIds.has(quest.id);
+              {smartQuests.map((quest) => {
                 const analysis = questAnalysis[quest.id];
                 const isAnalyzing = analyzingQuestId === quest.id;
                 const isFailed = failedAnalysisIds.has(quest.id);
 
-                let liveStatus: SmartQuest["status"] = quest.status;
-                if (isDone || analysis) liveStatus = "completed";
+                let liveStatus: SmartQuest["status"] = quest.status ?? "pending";
+                if (quest.status === "completed") liveStatus = "completed";
                 else if (isAnalyzing) liveStatus = "running";
                 else if (isFailed) liveStatus = "failed";
 
                 const liveQuest: SmartQuest = {
                   ...quest,
                   status: liveStatus,
-                  result: analysis ?? quest.result ?? null,
+                  result: quest.result ?? analysis ?? null,
                 };
 
                 // Контекст квеста для AI Vision: что именно нужно сделать и в какой
@@ -877,6 +936,7 @@ export default function MissionPage() {
                 );
               })}
             </div>
+            )}
           </div>
 
           <h2 className="mb-3 text-lg font-semibold">{t("mission.steps")}</h2>
