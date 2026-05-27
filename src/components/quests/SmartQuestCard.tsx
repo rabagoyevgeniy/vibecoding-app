@@ -357,6 +357,12 @@ function UserActionBody({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [done, setDone] = useState(quest.status === "completed");
 
+  // Синхронизация: если parent позже пометит квест как completed (например, при
+  // загрузке из Supabase), визуально подхватим это.
+  useEffect(() => {
+    if (quest.status === "completed") setDone(true);
+  }, [quest.status]);
+
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -367,6 +373,9 @@ function UserActionBody({
         setIsSubmitting(true);
         await onSubmit?.(quest.id, trimmed);
         setDone(true);
+      } catch {
+        // Бизнес-ошибки парент уже показал в toast — здесь молча остаёмся
+        // в исходном (не-success) состоянии, чтобы юзер мог поправить ввод.
       } finally {
         setIsSubmitting(false);
       }

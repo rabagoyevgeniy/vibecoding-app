@@ -42,6 +42,8 @@ import {
 } from "@/lib/supabase-storage";
 import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
 import { SmartQuestCard, type SmartQuest } from "@/components/quests/SmartQuestCard";
+import { verifyQuest } from "@/actions/verifyQuest";
+import { toast } from "sonner";
 
 // Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
 // Эти данные временно захардкожены, пока не подключим выборку из таблицы `smart_quests` (Supabase).
@@ -138,6 +140,64 @@ export default function MissionPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewSql, setPreviewSql] = useState<string | null>(null);
   const [isSqlPreviewOpen, setIsSqlPreviewOpen] = useState(false);
+
+  // Smart Quests (preview): локальное состояние "завершён", чтобы карточка визуально
+  // переключалась в зелёный success-режим сразу после успешной проверки AI-командой.
+  const [completedQuestIds, setCompletedQuestIds] = useState<Set<string>>(
+    () => new Set<string>()
+  );
+
+  const handleQuestUserSubmit = useCallback(
+    async (questId: string, value: string) => {
+      // Оптимистичный toast «AI проверяет...» с автоматическим обновлением до success/error.
+      const toastId = toast.loading("AI-команда проверяет ввод...");
+
+      try {
+        const result = await verifyQuest(questId, value);
+
+        if (result.success) {
+          toast.success(result.message, {
+            id: toastId,
+            description: "Шаг отмечен как завершённый.",
+            duration: 4500,
+          });
+          setCompletedQuestIds((prev) => {
+            const next = new Set(prev);
+            next.add(questId);
+            return next;
+          });
+        } else {
+          toast.error(result.error, {
+            id: toastId,
+            description: "Попробуй ещё раз. AI ждёт корректный формат.",
+            duration: 5000,
+          });
+          // Пробрасываем, чтобы SmartQuestCard остался в не-success состоянии.
+          throw new Error(result.error);
+        }
+      } catch (err) {
+        // Сетевые ошибки и проч. (verifyQuest уже сам кидает на бизнес-ошибках выше).
+        if (!(err instanceof Error) || !err.message) {
+          toast.error("Не удалось связаться с AI-командой.", { id: toastId });
+        }
+        throw err;
+      }
+    },
+    []
+  );
+
+  const handleQuestScreenshotUpload = useCallback(
+    (questId: string, file: File) => {
+      toast("Скриншот отправлен AI-наставнику", {
+        description: `${file.name} • ${Math.round(file.size / 1024)} KB`,
+        icon: "🔍",
+      });
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[SmartQuest] ai_vision_help upload", questId, file.name);
+      }
+    },
+    []
+  );
 
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
@@ -628,22 +688,20 @@ export default function MissionPage() {
               Ты — CEO. AI-команда выполняет техническую работу. Подтверждай ключевые решения, давай ключи и принимай результат.
             </p>
             <div className="flex flex-col gap-3">
-              {SMART_QUESTS_PREVIEW.map((quest) => (
-                <SmartQuestCard
-                  key={quest.id}
-                  quest={quest}
-                  onUserSubmit={(_id, value) => {
-                    if (process.env.NODE_ENV !== "production") {
-                      console.info("[SmartQuest] user_action submit", _id, value);
-                    }
-                  }}
-                  onScreenshotUpload={(_id, file) => {
-                    if (process.env.NODE_ENV !== "production") {
-                      console.info("[SmartQuest] ai_vision_help upload", _id, file.name);
-                    }
-                  }}
-                />
-              ))}
+              {SMART_QUESTS_PREVIEW.map((quest) => {
+                const isDone = completedQuestIds.has(quest.id);
+                const liveQuest: SmartQuest = isDone
+                  ? { ...quest, status: "completed" }
+                  : quest;
+                return (
+                  <SmartQuestCard
+                    key={quest.id}
+                    quest={liveQuest}
+                    onUserSubmit={handleQuestUserSubmit}
+                    onScreenshotUpload={handleQuestScreenshotUpload}
+                  />
+                );
+              })}
             </div>
           </div>
 
