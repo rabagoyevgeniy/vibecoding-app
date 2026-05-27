@@ -1,4 +1,5 @@
 import { incrementXpAndCheckLevel } from "./supabase-storage";
+import { getLevelTier } from "./levels";
 
 export interface ProgressData {
   current_day: number;
@@ -109,7 +110,9 @@ export function initializeProgressFromPlanDays(
   return {
     current_day: currentDay,
     xp,
-    level: Math.floor(xp / 100) + 1,
+    // Уровень считаем строго через `getLevelTier()` — это ЕДИНСТВЕННЫЙ источник
+    // истины для маппинга XP→level (см. lib/levels.ts).
+    level: getLevelTier(xp).level,
   };
 }
 
@@ -122,10 +125,13 @@ export function mergeProgress(
   const xp = Math.max(stored.xp, inferred.xp);
   const currentDay = Math.max(stored.current_day, inferred.current_day);
 
+  // Берём максимум из (старый stored level, inferred level, level из tier-системы).
+  // Это защищает от регрессии при миграции старых записей, где `level` мог
+  // быть записан по устаревшей линейной формуле.
   return {
     current_day: currentDay,
     xp,
-    level: Math.max(stored.level, inferred.level, Math.floor(xp / 100) + 1),
+    level: Math.max(stored.level, inferred.level, getLevelTier(xp).level),
   };
 }
 

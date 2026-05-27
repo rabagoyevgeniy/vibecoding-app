@@ -15,7 +15,13 @@
  *   - { success: false, error:   string }
  *
  * Дизайн ответа намеренно текстовый, чтобы фронт мог сразу показать его в toast.
+ *
+ * Auth: action гарантированно требует залогиненного пользователя. Если сессии
+ * нет — возвращаем `success: false` с понятным сообщением (Server Actions
+ * не могут отдавать настоящий HTTP 401, поэтому семантика 401 → бизнес-ошибка).
  */
+
+import { guardServerAction } from "@/lib/auth-guard";
 
 export type VerifyQuestResult =
   | { success: true; message: string; xpAwarded?: number }
@@ -24,10 +30,18 @@ export type VerifyQuestResult =
 const STRIPE_KEY_PATTERN = /^sk_(test|live)_[A-Za-z0-9]{4,}$/;
 const ARTIFICIAL_LATENCY_MS = 650; // имитируем «AI обдумывает ответ»
 
+const UNAUTHORIZED_RESULT: VerifyQuestResult = {
+  success: false,
+  error: "Сессия истекла. Войди в аккаунт, чтобы AI-команда могла записать прогресс.",
+};
+
 export async function verifyQuest(
   questId: string,
   value: string
 ): Promise<VerifyQuestResult> {
+  const guard = await guardServerAction<VerifyQuestResult>(() => UNAUTHORIZED_RESULT);
+  if (!guard.ok) return guard.error;
+
   // Минимальная серверная валидация: даже мок не должен падать на мусоре.
   if (typeof questId !== "string" || !questId.trim()) {
     return { success: false, error: "Некорректный questId." };

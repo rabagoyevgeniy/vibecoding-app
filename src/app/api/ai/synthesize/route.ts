@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardApiRoute } from "@/lib/auth-guard";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -77,6 +78,9 @@ const DAY_SYNTHESIS: Record<number, { artifact: string; instruction: string }> =
 };
 
 export async function POST(req: NextRequest) {
+  const guard = await guardApiRoute();
+  if (!guard.ok) return guard.response;
+
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "AI is not configured" }, { status: 500 });
   }

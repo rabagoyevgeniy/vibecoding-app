@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase-server';
+import { guardApiRoute } from '@/lib/auth-guard';
 
 // Server-only Anthropic client (API key never leaves the server)
 const anthropic = new Anthropic({
@@ -8,12 +9,19 @@ const anthropic = new Anthropic({
 });
 
 export async function POST(request: NextRequest) {
+  const guard = await guardApiRoute();
+  if (!guard.ok) return guard.response;
+
   try {
     const body = await request.json();
-    const { userId, toolName, input, currentDay } = body;
+    const { userId: requestedUserId, toolName, input, currentDay } = body;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    const userId = guard.user.id;
+    if (requestedUserId && requestedUserId !== userId) {
+      return NextResponse.json(
+        { error: 'userId mismatch with session' },
+        { status: 403 }
+      );
     }
     if (!toolName || !input) {
       return NextResponse.json({ error: 'toolName and input are required' }, { status: 400 });

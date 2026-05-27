@@ -17,6 +17,7 @@
  */
 
 import OpenAI from "openai";
+import { guardServerAction } from "@/lib/auth-guard";
 
 export interface ScreenshotPayload {
   name: string;
@@ -46,7 +47,18 @@ export type AnalyzeScreenshotResult =
   | { success: false; error: string };
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — визуальный лимит карточки
+/**
+ * Жёсткий лимит на размер base64 data URL. Vercel Serverless обрезает тело
+ * запроса на ~4.5 MB, поэтому всё, что больше 5 MB на стороне action'а,
+ * либо уже битое, либо обойдёт клиентское сжатие — рубим до OpenAI.
+ */
+const MAX_DATA_URL_LENGTH = 5 * 1024 * 1024; // 5 MB (символы ≈ байты для ASCII base64)
 const VISION_MODEL = "gpt-4o";
+
+const UNAUTHORIZED_RESULT: AnalyzeScreenshotResult = {
+  success: false,
+  error: "Сессия истекла. Войди в аккаунт, чтобы AI-наставник проанализировал скриншот.",
+};
 
 const USER_PROMPT = "Я застрял на этом экране. Что я вижу и какой мой следующий шаг?";
 
@@ -103,6 +115,14 @@ export async function analyzeScreenshot(
   file: ScreenshotPayload,
   context?: QuestContext
 ): Promise<AnalyzeScreenshotResult> {
+  // ===== 0. Auth-guard =====
+  // Без авторизованной сессии Vision-вызов не делаем: это стоит реальных
+  // токенов OpenAI, а у нас RLS + аналитика привязаны к user_id.
+  const authGuard = await guardServerAction<AnalyzeScreenshotResult>(
+    () => UNAUTHORIZED_RESULT
+  );
+  if (!authGuard.ok) return authGuard.error;
+
   // ===== 1. Валидация входа =====
   if (typeof questId !== "string" || !questId.trim()) {
     return { success: false, error: "Некорректный questId." };
@@ -125,6 +145,17 @@ export async function analyzeScreenshot(
     return {
       success: false,
       error: "Сервер не получил содержимое скриншота. Перезагрузи файл и попробуй ещё раз.",
+    };
+  }
+
+  // ===== 1.1 Жёсткий payload-guard ДО обращения к OpenAI =====
+  // Если что-то пробило клиентское сжатие и пришло >5 MB base64 —
+  // рубим сразу: иначе либо словим обрезанный запрос (Vercel 4.5 MB),
+  // либо потратим деньги на заведомо проигрышный Vision-вызов.
+  if (dataUrl.length > MAX_DATA_URL_LENGTH) {
+    return {
+      success: false,
+      error: "Скриншот слишком тяжёлый для AI Vision (>5 MB после кодирования). Сожми изображение и попробуй ещё раз.",
     };
   }
 

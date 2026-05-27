@@ -230,7 +230,9 @@ create trigger vc_plan_days_updated_at before update on public.vc_plan_days for 
 --    VIEW below that maps the clean `user_profiles` table. No JS changes needed
 --    for reads. Writes will be centralized via the new supabase-storage.ts layer.
 --
--- 3. The old supabase/schema.sql is preserved for historical reference.
+-- 3. The previous `supabase/schema.sql` (legacy "users"/"progress"/"missions"
+--    tables) was DELETED as part of the C3 audit fix — schema_v2.sql is the
+--    single source of truth from 2026 onward.
 -- ============================================================================
 
 -- ============================================================================
@@ -295,6 +297,83 @@ CREATE TRIGGER vc_nexus_sessions_updated_at
   FOR EACH ROW EXECUTE PROCEDURE public.handle_updated_at();
 
 CREATE INDEX idx_vc_nexus_sessions_user_day ON public.vc_nexus_sessions(user_id, day);
+
+-- ============================================================================
+-- 11. SMART_QUESTS (Interactive AI-driven quests — Day-by-day execution)
+-- Purpose: replaces the static `mission_steps` text with dynamic, branching
+-- quests where the AI either executes a task itself (ai_auto), asks the user
+-- for a real input like an API key (user_action), or analyses a screenshot
+-- when the user is stuck (ai_vision_help).
+--
+-- Источник истины для UI: src/components/quests/SmartQuestCard.tsx
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.smart_quests (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  day int NOT NULL CHECK (day BETWEEN 1 AND 7),
+  -- Порядок отображения внутри дня; используется фронтом для сортировки.
+  order_index int NOT NULL DEFAULT 0,
+  execution_type text NOT NULL
+    CHECK (execution_type IN ('ai_auto', 'user_action', 'ai_vision_help')),
+  title text NOT NULL,
+  description text NOT NULL,
+  -- Поля под `user_action`: подпись и плейсхолдер для поля ввода CEO.
+  input_label text,
+  input_placeholder text,
+  -- Опциональные строки лога для красивой терминальной анимации `ai_auto`.
+  ai_log_lines jsonb,
+  -- Жизненный цикл квеста — синхронизирован с SmartQuestStatus в TS.
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+  -- Для `user_action`: сообщение от verifyQuest (или сохранённый ввод).
+  -- Для `ai_vision_help`: текст AI-анализа от analyzeScreenshot.
+  result text,
+  -- Supabase project id пользователя — нужен AI Vision для deep-link'ов
+  -- в нужный раздел supabase.com/dashboard/project/<project_id>/...
+  project_id text,
+  xp_reward int NOT NULL DEFAULT 50 CHECK (xp_reward >= 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  -- Каждый квест уникален в пределах (user, day, order_index) — это позволяет
+  -- безопасно делать upsert при пересборке плана и предотвращает дубли.
+  UNIQUE (user_id, day, order_index)
+);
+
+ALTER TABLE public.smart_quests ENABLE ROW LEVEL SECURITY;
+
+-- Гранулярные политики (по образцу user_progress) — единая FOR ALL политика
+-- иногда конфликтует с PostgREST upsert на INSERT новых строк.
+CREATE POLICY "smart_quests_select_own"
+  ON public.smart_quests
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "smart_quests_insert_own"
+  ON public.smart_quests
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "smart_quests_update_own"
+  ON public.smart_quests
+  FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "smart_quests_delete_own"
+  ON public.smart_quests
+  FOR DELETE
+  USING (auth.uid() = user_id);
+
+CREATE TRIGGER smart_quests_updated_at
+  BEFORE UPDATE ON public.smart_quests
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_smart_quests_user_day
+  ON public.smart_quests(user_id, day);
+
+CREATE INDEX IF NOT EXISTS idx_smart_quests_user_status
+  ON public.smart_quests(user_id, status);
 
 -- ============================================================================
 -- RLS HARDENING MIGRATION (for user_progress upsert issues)

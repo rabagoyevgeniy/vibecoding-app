@@ -216,11 +216,10 @@ export async function fetchDayResponses(
  * Atomically add XP, recalculate level using the official tier system,
  * persist the new values, and return them.
  *
- * Formula / rules taken from:
- *  - src/lib/progress.ts (Math.floor + inferred logic)
- *  - src/lib/levels.ts (authoritative LEVEL_TIERS + getLevelTier)
- *
- * Level is always derived from XP via getLevelTier(xp).level to stay in sync with UI.
+ * Source of truth for level mapping: `src/lib/levels.ts` (LEVEL_TIERS +
+ * `getLevelTier`). Frontend (mission/dashboard/profile) и `src/lib/progress.ts`
+ * используют ту же функцию — нельзя добавлять линейные fallback-формулы
+ * (типа `Math.floor(xp / 100) + 1`): иначе backend и UI разойдутся.
  */
 export async function incrementXpAndCheckLevel(
   userId: string,

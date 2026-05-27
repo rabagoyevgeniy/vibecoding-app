@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardApiRoute } from "@/lib/auth-guard";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 export async function POST(req: NextRequest) {
+  const guard = await guardApiRoute();
+  if (!guard.ok) return guard.response;
+
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json(
       { response: "AI is not configured. Add ANTHROPIC_API_KEY to .env.local" },

@@ -33,6 +33,7 @@ import {
   setStoredProgress,
   type ProgressData,
 } from "@/lib/progress";
+import { getLevelTier } from "@/lib/levels";
 import {
   saveStepResponse,
   fetchDayResponses,
@@ -583,7 +584,7 @@ export default function MissionPage() {
         const updated = {
           ...storedProgress,
           xp: newXp,
-          level: Math.floor(newXp / 100) + 1,
+          level: getLevelTier(newXp).level,
         };
 
         setStoredProgress(updated);
@@ -624,7 +625,7 @@ export default function MissionPage() {
         const updated: ProgressData = {
           ...storedProgress,
           xp: newXp,
-          level: Math.floor(newXp / 100) + 1,
+          level: getLevelTier(newXp).level,
         };
 
         const justCompletedDay = next.length === currentMission.steps.length;
@@ -634,7 +635,7 @@ export default function MissionPage() {
             newXp += 50;
             updated.current_day = Math.min(day + 1, 7);
             updated.xp = newXp;
-            updated.level = Math.floor(newXp / 100) + 1;
+            updated.level = getLevelTier(newXp).level;
           }
 
           void syncDynamicDayCompletion();

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { nexusEngine } from '@/lib/nexus';
 import { createClient } from '@/lib/supabase-server';
+import { guardApiRoute } from '@/lib/auth-guard';
 import type { NexusAction, NexusToolResult } from '@/lib/nexus/types';
 
 // Initialize Anthropic client safely on the server
@@ -10,12 +11,22 @@ const anthropic = new Anthropic({
 });
 
 export async function POST(request: NextRequest) {
+  const guard = await guardApiRoute();
+  if (!guard.ok) return guard.response;
+
   try {
     const body = await request.json();
-    const { userId, userPrompt, currentDay } = body;
+    const { userId: requestedUserId, userPrompt, currentDay } = body;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    // Никогда не доверяем `userId` из тела — берём из проверенной сессии.
+    // Тело сохраняем как fallback на случай, если фронтенд для отладки прислал
+    // тот же id (он должен совпасть с серверным), но это не источник истины.
+    const userId = guard.user.id;
+    if (requestedUserId && requestedUserId !== userId) {
+      return NextResponse.json(
+        { error: 'userId mismatch with session' },
+        { status: 403 }
+      );
     }
 
     // Default test prompt as specified
