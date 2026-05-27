@@ -41,6 +41,36 @@ import {
   fetchSideQuestsForDay,
 } from "@/lib/supabase-storage";
 import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
+import { SmartQuestCard, type SmartQuest } from "@/components/quests/SmartQuestCard";
+
+// Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
+// Эти данные временно захардкожены, пока не подключим выборку из таблицы `smart_quests` (Supabase).
+const SMART_QUESTS_PREVIEW: SmartQuest[] = [
+  {
+    id: "preview-ai-auto",
+    title: "AI-команда поднимает Next.js + Supabase для школы плавания",
+    description:
+      "Техническая команда сама создаст репозиторий, развернёт фронт и базу. От тебя — только финальное одобрение.",
+    execution_type: "ai_auto",
+    status: "running",
+  },
+  {
+    id: "preview-user-action",
+    title: "Подключи Stripe для приёма оплат за абонементы",
+    description:
+      "Зайди в dashboard.stripe.com → Developers → API keys и вставь сюда secret key. AI проверит ключ и завершит шаг.",
+    execution_type: "user_action",
+    input_label: "Stripe Secret Key",
+    input_placeholder: "sk_live_...",
+  },
+  {
+    id: "preview-vision",
+    title: "Не понимаешь, где в Supabase включить RLS?",
+    description:
+      "Сделай скриншот того, что ты видишь сейчас — AI-наставник укажет стрелкой, куда нажать.",
+    execution_type: "ai_vision_help",
+  },
+];
 
 function mapPlanDayToMission(
   planDay: StoredPlanDay,
@@ -576,6 +606,47 @@ export default function MissionPage() {
       {/* Focus Mode: Hide mission steps when AI agent is active to give 100% attention to the Terminal */}
       {showMissionSteps ? (
         <>
+          {/* === Smart Quests (preview нового ядра продукта) === */}
+          <div className="mb-6">
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Smart Quests</h2>
+              <span
+                className="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                style={{
+                  background: "var(--accent-glow)",
+                  borderColor: "var(--accent)",
+                  color: "var(--accent-light)",
+                }}
+              >
+                preview
+              </span>
+            </div>
+            <p
+              className="mb-3 text-xs leading-relaxed"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Ты — CEO. AI-команда выполняет техническую работу. Подтверждай ключевые решения, давай ключи и принимай результат.
+            </p>
+            <div className="flex flex-col gap-3">
+              {SMART_QUESTS_PREVIEW.map((quest) => (
+                <SmartQuestCard
+                  key={quest.id}
+                  quest={quest}
+                  onUserSubmit={(_id, value) => {
+                    if (process.env.NODE_ENV !== "production") {
+                      console.info("[SmartQuest] user_action submit", _id, value);
+                    }
+                  }}
+                  onScreenshotUpload={(_id, file) => {
+                    if (process.env.NODE_ENV !== "production") {
+                      console.info("[SmartQuest] ai_vision_help upload", _id, file.name);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
           <h2 className="mb-3 text-lg font-semibold">{t("mission.steps")}</h2>
           <StepList
             steps={mission.steps}

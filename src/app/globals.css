@@ -88,3 +88,15 @@ body {
 .logo-accent {
   animation: logoTextGlow 4s ease-in-out infinite;
 }
+
+/* SmartQuestCard — терминальный сканлайн + мигающий каретка */
+@keyframes smartQuestScan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  20% { opacity: 0.6; }
+  100% { transform: translateY(180%); opacity: 0; }
+}
+
+@keyframes smartQuestCaret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
