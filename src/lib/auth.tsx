@@ -75,11 +75,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = useCallback(
     async (email: string, password: string) => {
+      // Also enforce callback for email magic links / confirmations
+      const callbackUrl = `${window.location.origin}/auth/callback`;
+
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: callbackUrl,
         },
       });
       return { error: error?.message ?? null };
@@ -88,10 +91,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signInWithGoogle = useCallback(async () => {
+    // CRITICAL: Always explicitly set redirectTo to our callback route.
+    // Without this, Supabase may fall back to the root URL (/) on Vercel/custom domains.
+    const callbackUrl = `${window.location.origin}/auth/callback`;
+
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callbackUrl,
       },
     });
   }, [supabase]);

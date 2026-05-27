@@ -105,6 +105,7 @@ function AuthContent() {
 
         <button
           onClick={signInWithGoogle}
+          // This triggers signInWithOAuth which now explicitly sets redirectTo to /auth/callback
           className="mb-4 flex w-full items-center justify-center gap-3 py-3 text-sm font-medium transition-all duration-200"
           style={{
             background: "var(--bg-elevated)",
