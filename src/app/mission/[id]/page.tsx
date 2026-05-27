@@ -46,21 +46,70 @@ import { verifyQuest } from "@/actions/verifyQuest";
 import { analyzeScreenshot } from "@/actions/analyzeScreenshot";
 import { toast } from "sonner";
 
-// Читаем File как base64 data URL (`data:image/png;base64,...`).
-// Server Action `analyzeScreenshot` ожидает строку именно в таком формате,
-// чтобы прокинуть её прямо в `image_url.url` OpenAI Vision.
-function readFileAsDataUrl(file: File): Promise<string> {
+/**
+ * compressImage — клиентское сжатие скриншота перед отправкой в Server Action.
+ *
+ * Зачем: на Vercel есть жёсткий лимит 4.5 MB на payload Serverless-функций.
+ * Сырые скриншоты в base64 регулярно превышают его, и Vercel молча обрезает
+ * тело запроса — `dataUrl` приходит пустым, экшен возвращает ошибку.
+ *
+ * Что делает:
+ *   1. Загружает файл через `URL.createObjectURL` (без блокирующего FileReader).
+ *   2. Декодирует через `<img>` (браузер сам разбирает PNG/JPG/WebP/HEIC).
+ *   3. Пропорционально уменьшает до max 1200px по большей стороне (без upscale).
+ *   4. Рисует на off-DOM `<canvas>` и сериализует в JPEG 0.7.
+ *   5. Чистит ObjectURL в `finally`, чтобы не текла память.
+ *
+ * Итог: ~100-300 KB вместо 5-13 MB → проходит лимит Vercel, экономит трафик
+ * пользователю и токены OpenAI Vision.
+ */
+const SCREENSHOT_MAX_DIMENSION = 1200;
+const SCREENSHOT_JPEG_QUALITY = 0.7;
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const out = reader.result;
-      if (typeof out === "string") resolve(out);
-      else reject(new Error("FileReader вернул не-строку."));
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("FileReader не смог прочитать файл."));
-    reader.readAsDataURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Не удалось декодировать изображение."));
+    img.src = src;
   });
+}
+
+async function compressImage(file: File): Promise<string> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImageElement(objectUrl);
+
+    const sourceWidth = img.naturalWidth || img.width;
+    const sourceHeight = img.naturalHeight || img.height;
+    if (sourceWidth === 0 || sourceHeight === 0) {
+      throw new Error("Изображение имеет нулевые размеры.");
+    }
+
+    // Пропорционально вписываем в SCREENSHOT_MAX_DIMENSION по большей стороне.
+    // Если картинка уже меньше — не апскейлим, чтобы не размывать.
+    const longest = Math.max(sourceWidth, sourceHeight);
+    const scale = longest > SCREENSHOT_MAX_DIMENSION ? SCREENSHOT_MAX_DIMENSION / longest : 1;
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Браузер не поддерживает canvas 2D context.");
+    }
+
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    // toDataURL форсит JPEG → автоматически выкидываем альфа-канал и сжимаем
+    // до ~10% от исходного размера PNG-скриншота.
+    return canvas.toDataURL("image/jpeg", SCREENSHOT_JPEG_QUALITY);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 // Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
@@ -236,13 +285,17 @@ export default function MissionPage() {
       });
 
       try {
-        // Конвертим File → base64 data URL ДО вызова Server Action,
-        // потому что File не сериализуется через RSC-границу.
-        const dataUrl = await readFileAsDataUrl(file);
+        // Сжимаем скриншот в браузере до отправки на сервер:
+        //  - File не сериализуется через RSC-границу.
+        //  - Сырой base64 может превысить 4.5 MB лимит Vercel Serverless.
+        // На выходе получаем JPEG data URL ~100-300 KB.
+        const dataUrl = await compressImage(file);
 
         const result = await analyzeScreenshot(questId, {
           name: file.name,
-          type: file.type,
+          // Браузерный canvas всегда возвращает JPEG, переписываем mime,
+          // чтобы серверная валидация принимала результат.
+          type: "image/jpeg",
           size: file.size,
           dataUrl,
         });
