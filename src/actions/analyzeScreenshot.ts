@@ -26,6 +26,21 @@ export interface ScreenshotPayload {
   dataUrl?: string;
 }
 
+/**
+ * Контекст текущего квеста, чтобы Vision-LLM сравнивала скриншот не
+ * "вообще", а с конкретной целью пользователя (например: "включить RLS",
+ * "взять API key из Stripe") и могла отправить его прямой ссылкой в нужный
+ * раздел Supabase.
+ */
+export interface QuestContext {
+  /** Название квеста (что нужно сделать). */
+  title: string;
+  /** Описание цели — что именно ожидается от пользователя. */
+  description: string;
+  /** Supabase project id для генерации deep-link'ов в dashboard. */
+  projectId?: string | null;
+}
+
 export type AnalyzeScreenshotResult =
   | { success: true; analysis: string }
   | { success: false; error: string };
@@ -33,16 +48,60 @@ export type AnalyzeScreenshotResult =
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — визуальный лимит карточки
 const VISION_MODEL = "gpt-4o";
 
-const SYSTEM_PROMPT =
-  "Ты — технический наставник (Senior CTO). Пользователь строит платформу и застрял. " +
-  "Проанализируй этот скриншот. Коротко и дружелюбно (2-3 предложения) объясни, что ты видишь на экране, " +
-  "и дай конкретную подсказку, что нужно сделать или куда нажать дальше.";
-
 const USER_PROMPT = "Я застрял на этом экране. Что я вижу и какой мой следующий шаг?";
+
+/**
+ * Строит системный промпт для GPT-4o с учётом контекста квеста.
+ *
+ * Если контекст пустой — фолбэк на старое поведение "просто опиши экран".
+ * Если есть контекст с `projectId` — даём модели готовый шаблон deep-link'а
+ * именно для этого проекта, чтобы пользователь мог кликнуть и перейти.
+ */
+function buildSystemPrompt(context?: QuestContext): string {
+  const intro =
+    "Ты — технический наставник (Senior CTO). Пользователь строит платформу " +
+    "и застрял. Проанализируй этот скриншот. Коротко и дружелюбно (2-3 предложения) " +
+    "объясни, что ты видишь на экране, и дай конкретную подсказку, что нужно " +
+    "сделать или куда нажать дальше.";
+
+  if (!context) return intro;
+
+  const safeTitle = context.title?.trim() || "Без названия";
+  const safeGoal = context.description?.trim() || "Цель не указана.";
+  const projectId = context.projectId?.trim();
+
+  const linkInstruction = projectId
+    ? `ID проекта пользователя в Supabase: "${projectId}". ` +
+      "Если нужно отправить пользователя в конкретный раздел Supabase, " +
+      "ОБЯЗАТЕЛЬНО приложи прямую ссылку в формате " +
+      `https://supabase.com/dashboard/project/${projectId}/<раздел> ` +
+      '(например, /auth/policies, /editor, /api, /settings/api). ' +
+      "Ссылка должна стоять отдельной строкой в конце ответа — фронтенд распознает её и сделает кнопку."
+    : "Если нужно отправить пользователя в раздел Supabase, формируй ссылку в формате " +
+      "https://supabase.com/dashboard/project/<project_id>/<раздел> и положи её отдельной строкой в конце ответа.";
+
+  return [
+    intro,
+    "",
+    "КОНТЕКСТ КВЕСТА:",
+    `• Название: ${safeTitle}`,
+    `• Текущая цель: ${safeGoal}`,
+    "",
+    "ИНСТРУКЦИЯ:",
+    "1. Сравни то, что ты видишь на скриншоте, с целью квеста.",
+    "2. Если пользователь находится В нужном месте — подскажи следующий конкретный клик.",
+    "3. Если пользователь НЕ ТАМ, где должен быть — начни ответ с фразы " +
+      '"Ты сейчас не там, где нужно. Тебе нужно перейти в [Конкретная вкладка]" ' +
+      "и обязательно дай прямую ссылку на нужный раздел.",
+    "",
+    linkInstruction,
+  ].join("\n");
+}
 
 export async function analyzeScreenshot(
   questId: string,
-  file: ScreenshotPayload
+  file: ScreenshotPayload,
+  context?: QuestContext
 ): Promise<AnalyzeScreenshotResult> {
   // ===== 1. Валидация входа =====
   if (typeof questId !== "string" || !questId.trim()) {
@@ -88,7 +147,7 @@ export async function analyzeScreenshot(
       max_completion_tokens: 300,
       temperature: 0.4,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: buildSystemPrompt(context) },
         {
           role: "user",
           content: [

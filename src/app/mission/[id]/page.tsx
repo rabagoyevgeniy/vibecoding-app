@@ -43,7 +43,7 @@ import {
 import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
 import { SmartQuestCard, type SmartQuest } from "@/components/quests/SmartQuestCard";
 import { verifyQuest } from "@/actions/verifyQuest";
-import { analyzeScreenshot } from "@/actions/analyzeScreenshot";
+import { analyzeScreenshot, type QuestContext } from "@/actions/analyzeScreenshot";
 import { toast } from "sonner";
 
 /**
@@ -134,10 +134,14 @@ const SMART_QUESTS_PREVIEW: SmartQuest[] = [
   },
   {
     id: "preview-vision",
-    title: "Не понимаешь, где в Supabase включить RLS?",
+    title: "Включи Row Level Security для таблицы bookings",
     description:
-      "Сделай скриншот того, что ты видишь сейчас — AI-наставник укажет стрелкой, куда нажать.",
+      "Нужно перейти в Authentication → Policies, выбрать таблицу bookings " +
+      "и нажать Enable RLS, чтобы клиенты школы плавания не могли видеть чужие записи.",
     execution_type: "ai_vision_help",
+    // В реальной БД сюда придёт `smart_quests.project_id`. Пока — демо-значение,
+    // чтобы AI Vision реально подставлял его в deep-link'и.
+    project_id: "demo-swim-school-abc123",
   },
 ];
 
@@ -264,7 +268,7 @@ export default function MissionPage() {
   );
 
   const handleQuestScreenshotUpload = useCallback(
-    async (questId: string, file: File) => {
+    async (questId: string, file: File, context?: QuestContext) => {
       // Сбрасываем предыдущий ответ/ошибку для этого квеста, помечаем "идёт анализ".
       setAnalyzingQuestId(questId);
       setFailedAnalysisIds((prev) => {
@@ -291,14 +295,18 @@ export default function MissionPage() {
         // На выходе получаем JPEG data URL ~100-300 KB.
         const dataUrl = await compressImage(file);
 
-        const result = await analyzeScreenshot(questId, {
-          name: file.name,
-          // Браузерный canvas всегда возвращает JPEG, переписываем mime,
-          // чтобы серверная валидация принимала результат.
-          type: "image/jpeg",
-          size: file.size,
-          dataUrl,
-        });
+        const result = await analyzeScreenshot(
+          questId,
+          {
+            name: file.name,
+            // Браузерный canvas всегда возвращает JPEG, переписываем mime,
+            // чтобы серверная валидация принимала результат.
+            type: "image/jpeg",
+            size: file.size,
+            dataUrl,
+          },
+          context
+        );
 
         if (result.success) {
           toast.success("AI-наставник нашёл подсказку", {
@@ -848,12 +856,22 @@ export default function MissionPage() {
                   result: analysis ?? quest.result ?? null,
                 };
 
+                // Контекст квеста для AI Vision: что именно нужно сделать и в какой
+                // Supabase project направить пользователя через deep-link.
+                const questContext: QuestContext = {
+                  title: quest.title,
+                  description: quest.description,
+                  projectId: quest.project_id ?? null,
+                };
+
                 return (
                   <SmartQuestCard
                     key={quest.id}
                     quest={liveQuest}
                     onUserSubmit={handleQuestUserSubmit}
-                    onScreenshotUpload={handleQuestScreenshotUpload}
+                    onScreenshotUpload={(qid, f) =>
+                      handleQuestScreenshotUpload(qid, f, questContext)
+                    }
                   />
                 );
               })}

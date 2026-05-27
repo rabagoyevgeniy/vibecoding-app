@@ -13,6 +13,7 @@
  */
 
 import {
+  ArrowUpRight,
   Bot,
   Check,
   HelpCircle,
@@ -52,6 +53,23 @@ export interface SmartQuest {
   ai_log_lines?: string[] | null;
   status?: SmartQuestStatus;
   result?: string | null;
+  /** Supabase project id — используется AI Vision для генерации deep-link'ов в dashboard. */
+  project_id?: string | null;
+}
+
+/**
+ * Извлекает первую внешнюю ссылку (`https?://...`) из текста AI-анализа.
+ * Возвращает чистый URL без хвостовой пунктуации.
+ *
+ * Используется в `AiVisionHelpBody`, чтобы превратить ссылку из ответа модели
+ * в кликабельную CTA-кнопку "Перейти к настройкам".
+ */
+export function extractDeepLink(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const match = text.match(/https?:\/\/[^\s<>"'`]+/);
+  if (!match) return null;
+  // Срезаем дряблую пунктуацию, которая часто прилипает к URL ("...policies).", "/edit?", и т.п.).
+  return match[0].replace(/[.,;!?)\]}>]+$/, "");
 }
 
 export interface SmartQuestCardProps {
@@ -520,6 +538,10 @@ function AiVisionHelpBody({
     const analysis = quest.result?.trim();
     const isFailed = quest.status === "failed";
     const isAnalyzing = !analysis && !isFailed;
+    // Если в ответе AI есть ссылка (например, на нужный раздел Supabase) —
+    // вытаскиваем её и убираем из текста, чтобы не показывать сырой URL дважды.
+    const deepLink = extractDeepLink(analysis);
+    const analysisText = deepLink ? analysis?.replace(deepLink, "").trim() : analysis;
 
     return (
       <div className="space-y-3">
@@ -581,7 +603,26 @@ function AiVisionHelpBody({
               <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--success)]">
                 Подсказка AI-наставника
               </div>
-              <p className="whitespace-pre-line text-white/85">{analysis}</p>
+              {analysisText && (
+                <p className="whitespace-pre-line text-white/85">{analysisText}</p>
+              )}
+
+              {deepLink && (
+                <a
+                  href={deepLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 active:scale-[0.985] hover:brightness-110"
+                  style={{
+                    background: "linear-gradient(135deg, var(--accent), #6d28d9)",
+                    boxShadow: "var(--shadow-glow)",
+                  }}
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Перейти к настройкам
+                </a>
+              )}
+
               <button
                 type="button"
                 onClick={handleReset}
