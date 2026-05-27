@@ -43,6 +43,7 @@ import {
 import { useMissionNexus } from "@/lib/nexus/useMissionNexus";
 import { SmartQuestCard, type SmartQuest } from "@/components/quests/SmartQuestCard";
 import { verifyQuest } from "@/actions/verifyQuest";
+import { analyzeScreenshot } from "@/actions/analyzeScreenshot";
 import { toast } from "sonner";
 
 // Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
@@ -147,6 +148,16 @@ export default function MissionPage() {
     () => new Set<string>()
   );
 
+  // Vision Help (ai_vision_help): какой квест прямо сейчас анализируется
+  // и какие подсказки уже получены от AI-наставника. Прокидываются в карточку
+  // как `quest.status` / `quest.result`, чтобы лоадер выключался и появлялся
+  // блок с ответом.
+  const [analyzingQuestId, setAnalyzingQuestId] = useState<string | null>(null);
+  const [questAnalysis, setQuestAnalysis] = useState<Record<string, string>>({});
+  const [failedAnalysisIds, setFailedAnalysisIds] = useState<Set<string>>(
+    () => new Set<string>()
+  );
+
   const handleQuestUserSubmit = useCallback(
     async (questId: string, value: string) => {
       // Оптимистичный toast «AI проверяет...» с автоматическим обновлением до success/error.
@@ -187,13 +198,69 @@ export default function MissionPage() {
   );
 
   const handleQuestScreenshotUpload = useCallback(
-    (questId: string, file: File) => {
-      toast("Скриншот отправлен AI-наставнику", {
-        description: `${file.name} • ${Math.round(file.size / 1024)} KB`,
-        icon: "🔍",
+    async (questId: string, file: File) => {
+      // Сбрасываем предыдущий ответ/ошибку для этого квеста, помечаем "идёт анализ".
+      setAnalyzingQuestId(questId);
+      setFailedAnalysisIds((prev) => {
+        if (!prev.has(questId)) return prev;
+        const next = new Set(prev);
+        next.delete(questId);
+        return next;
       });
-      if (process.env.NODE_ENV !== "production") {
-        console.info("[SmartQuest] ai_vision_help upload", questId, file.name);
+      setQuestAnalysis((prev) => {
+        if (!(questId in prev)) return prev;
+        const next = { ...prev };
+        delete next[questId];
+        return next;
+      });
+
+      const toastId = toast.loading("AI-наставник анализирует скриншот...", {
+        description: `${file.name} • ${Math.max(1, Math.round(file.size / 1024))} KB`,
+      });
+
+      try {
+        const result = await analyzeScreenshot(questId, {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+        });
+
+        if (result.success) {
+          toast.success("AI-наставник нашёл подсказку", {
+            id: toastId,
+            description: result.analysis,
+            duration: 9000,
+          });
+          setQuestAnalysis((prev) => ({ ...prev, [questId]: result.analysis }));
+        } else {
+          toast.error(result.error, {
+            id: toastId,
+            description: "Попробуй загрузить другой скриншот.",
+            duration: 5000,
+          });
+          setFailedAnalysisIds((prev) => {
+            const next = new Set(prev);
+            next.add(questId);
+            return next;
+          });
+        }
+      } catch (err) {
+        // Сетевые / неожиданные ошибки. Бизнес-ошибки уже отрисованы выше.
+        toast.error("Не удалось связаться с AI-наставником.", {
+          id: toastId,
+          description: "Проверь соединение и попробуй ещё раз.",
+        });
+        setFailedAnalysisIds((prev) => {
+          const next = new Set(prev);
+          next.add(questId);
+          return next;
+        });
+        if (process.env.NODE_ENV !== "production") {
+          console.error("[SmartQuest] analyzeScreenshot threw", err);
+        }
+      } finally {
+        // КРИТИЧНО: гасим лоадер карточки в любом случае.
+        setAnalyzingQuestId((current) => (current === questId ? null : current));
       }
     },
     []
@@ -689,10 +756,23 @@ export default function MissionPage() {
             </p>
             <div className="flex flex-col gap-3">
               {SMART_QUESTS_PREVIEW.map((quest) => {
+                // Собираем "живое" состояние квеста из всех источников state выше.
                 const isDone = completedQuestIds.has(quest.id);
-                const liveQuest: SmartQuest = isDone
-                  ? { ...quest, status: "completed" }
-                  : quest;
+                const analysis = questAnalysis[quest.id];
+                const isAnalyzing = analyzingQuestId === quest.id;
+                const isFailed = failedAnalysisIds.has(quest.id);
+
+                let liveStatus: SmartQuest["status"] = quest.status;
+                if (isDone || analysis) liveStatus = "completed";
+                else if (isAnalyzing) liveStatus = "running";
+                else if (isFailed) liveStatus = "failed";
+
+                const liveQuest: SmartQuest = {
+                  ...quest,
+                  status: liveStatus,
+                  result: analysis ?? quest.result ?? null,
+                };
+
                 return (
                   <SmartQuestCard
                     key={quest.id}

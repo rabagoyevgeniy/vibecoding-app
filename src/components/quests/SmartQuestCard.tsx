@@ -513,6 +513,14 @@ function AiVisionHelpBody({
   }, [previewUrl]);
 
   if (file && previewUrl) {
+    // Состояние карточки после загрузки определяется родителем:
+    //   - `quest.result` пустой и status != "failed" → AI ещё анализирует (спиннер).
+    //   - `quest.result` пришёл               → показываем ответ AI-наставника.
+    //   - status === "failed"                 → показываем сообщение об ошибке.
+    const analysis = quest.result?.trim();
+    const isFailed = quest.status === "failed";
+    const isAnalyzing = !analysis && !isFailed;
+
     return (
       <div className="space-y-3">
         <div
@@ -536,17 +544,69 @@ function AiVisionHelpBody({
           </button>
         </div>
 
-        <div
-          className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"
-          style={{
-            background: "rgba(14,165,233,0.08)",
-            borderColor: "rgba(14,165,233,0.35)",
-            color: "#bae6fd",
-          }}
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          AI-наставник анализирует экран... Сейчас подскажу, куда нажать.
-        </div>
+        {isAnalyzing && (
+          <div
+            className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+            style={{
+              background: "rgba(14,165,233,0.08)",
+              borderColor: "rgba(14,165,233,0.35)",
+              color: "#bae6fd",
+            }}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            AI-наставник анализирует экран... Сейчас подскажу, куда нажать.
+          </div>
+        )}
+
+        {analysis && (
+          <div
+            className="flex items-start gap-3 rounded-xl border px-3 py-3 text-xs leading-relaxed"
+            style={{
+              background: "rgba(34,197,94,0.08)",
+              borderColor: "rgba(34,197,94,0.4)",
+              color: "#bbf7d0",
+            }}
+          >
+            <div
+              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+              style={{
+                background: "rgba(34,197,94,0.2)",
+                color: "var(--success)",
+                boxShadow: "0 0 12px rgba(34,197,94,0.4)",
+              }}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--success)]">
+                Подсказка AI-наставника
+              </div>
+              <p className="whitespace-pre-line text-white/85">{analysis}</p>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="mt-2 text-[10px] font-semibold uppercase tracking-wider underline-offset-2 hover:underline"
+                style={{ color: "#7dd3fc" }}
+              >
+                Загрузить другой скриншот
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isFailed && !analysis && (
+          <div
+            className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+            style={{
+              background: "rgba(239,68,68,0.08)",
+              borderColor: "rgba(239,68,68,0.4)",
+              color: "#fecaca",
+            }}
+          >
+            <X className="h-3.5 w-3.5" />
+            AI-наставник не смог обработать скриншот. Попробуй ещё раз.
+          </div>
+        )}
       </div>
     );
   }
