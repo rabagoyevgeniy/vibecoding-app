@@ -46,6 +46,23 @@ import { verifyQuest } from "@/actions/verifyQuest";
 import { analyzeScreenshot } from "@/actions/analyzeScreenshot";
 import { toast } from "sonner";
 
+// Читаем File как base64 data URL (`data:image/png;base64,...`).
+// Server Action `analyzeScreenshot` ожидает строку именно в таком формате,
+// чтобы прокинуть её прямо в `image_url.url` OpenAI Vision.
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const out = reader.result;
+      if (typeof out === "string") resolve(out);
+      else reject(new Error("FileReader вернул не-строку."));
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("FileReader не смог прочитать файл."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // Превью нового ядра продукта: Smart Quests заменяют статичные шаги.
 // Эти данные временно захардкожены, пока не подключим выборку из таблицы `smart_quests` (Supabase).
 const SMART_QUESTS_PREVIEW: SmartQuest[] = [
@@ -219,10 +236,15 @@ export default function MissionPage() {
       });
 
       try {
+        // Конвертим File → base64 data URL ДО вызова Server Action,
+        // потому что File не сериализуется через RSC-границу.
+        const dataUrl = await readFileAsDataUrl(file);
+
         const result = await analyzeScreenshot(questId, {
           name: file.name,
           type: file.type,
           size: file.size,
+          dataUrl,
         });
 
         if (result.success) {
