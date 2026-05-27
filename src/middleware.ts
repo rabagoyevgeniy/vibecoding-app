@@ -4,8 +4,16 @@ import { NextResponse, type NextRequest } from "next/server";
 // Pages that don't require authentication
 const PUBLIC_PATHS = ["/", "/auth", "/auth/callback"];
 
+// ULTIMATE FIX: Explicit early bypass for OAuth callback.
+// This must run before any Supabase session check, because during the ?code= exchange
+// the session cookies are not yet set. Without this, middleware can redirect back to /auth or /.
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Hard bypass for auth callback — must be first to prevent redirect loops during OAuth code exchange
+  if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {
+    return NextResponse.next();
+  }
 
   // Allow public paths
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {

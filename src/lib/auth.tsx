@@ -91,14 +91,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signInWithGoogle = useCallback(async () => {
-    // CRITICAL: Always explicitly set redirectTo to our callback route.
-    // Without this, Supabase may fall back to the root URL (/) on Vercel/custom domains.
-    const callbackUrl = `${window.location.origin}/auth/callback`;
-
+    // ULTIMATE FIX: Hardcode production redirectTo to prevent any client-side origin resolution issues on Vercel/custom domains.
+    // Supabase will now always receive the exact expected callback URL.
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: callbackUrl,
+        redirectTo: 'https://7dais.com/auth/callback',
       },
     });
   }, [supabase]);
