@@ -12,6 +12,13 @@ import { DEFAULT_PROGRESS, getStoredProgress, setStoredGoal, setStoredProgress }
 import { hasCompletedOnboarding } from "@/lib/supabase-storage";
 
 const TOTAL_STEPS = 5;
+const LOADING_MESSAGES_RU = [
+  "Анализируем заполненную анкету и ищем скрытые инсайты...",
+  "Проектируем архитектуру под твою бизнес-логику...",
+  "Архитектор ИИ распределяет нагрузку и подбирает стек квестов...",
+  "Связываем Supabase, модули авторизации и RLS-политики...",
+  "Финально упаковываем персональный план разработки...",
+];
 
 type Goal = "money" | "startup" | "ai" | "learn";
 type Experience = "beginner" | "some" | "experienced";
@@ -62,6 +69,8 @@ export default function OnboardingPage() {
   const { user, loading: authLoading } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const [loadingMessageVisible, setLoadingMessageVisible] = useState(true);
   const [data, setData] = useState<OnboardingData>({
     goal: null,
     experience: null,
@@ -80,6 +89,26 @@ export default function OnboardingPage() {
       }
     })();
   }, [user?.id, authLoading, router]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingMessageIndex(0);
+      setLoadingMessageVisible(true);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setLoadingMessageVisible(false);
+      window.setTimeout(() => {
+        setLoadingMessageIndex((prev) => (prev + 1) % LOADING_MESSAGES_RU.length);
+        setLoadingMessageVisible(true);
+      }, 220);
+    }, 2500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loading]);
 
   const canNext =
     (step === 1 && data.goal !== null) ||
@@ -389,10 +418,12 @@ export default function OnboardingPage() {
               {t("onboarding.loading_title")}
             </h2>
             <p
-              className="text-center text-sm"
+              className={`min-h-[44px] text-center text-sm transition-opacity duration-300 ${
+                loadingMessageVisible ? "opacity-100" : "opacity-0"
+              }`}
               style={{ color: "var(--text-muted)" }}
             >
-              {t("onboarding.loading_desc")}
+              {loading ? LOADING_MESSAGES_RU[loadingMessageIndex] : t("onboarding.loading_desc")}
             </p>
             <div className="mt-8 flex gap-2">
               {[0, 1, 2].map((i) => (
