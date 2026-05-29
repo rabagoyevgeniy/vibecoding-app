@@ -282,7 +282,7 @@ const AIMentorComponent = ({
   const startDynamicReasoning = (toolName?: string) => {
     // Add EXACTLY ONE log line on "Выполнить" click
     setReasoningLogs([
-      { text: `[⏳] Отправка запроса провайдеру (Claude 3.5)...`, status: 'thinking' }
+      { text: `[⏳] Отправка запроса провайдеру (Claude Sonnet 4)...`, status: 'thinking' }
     ]);
     setIsReasoningComplete(false);
     setThinking(true);

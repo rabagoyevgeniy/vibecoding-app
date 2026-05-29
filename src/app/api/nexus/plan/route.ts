@@ -178,7 +178,7 @@ Your job is to help the user progress by calling the most relevant registered to
 
     // Call Anthropic with native Tool Use
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-latest',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       system: systemPrompt,
       messages: [
