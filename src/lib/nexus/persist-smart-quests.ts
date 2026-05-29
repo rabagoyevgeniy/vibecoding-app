@@ -238,7 +238,9 @@ export async function persistSmartQuestsForDay(
 
   if (fetchError) {
     console.error("[persistSmartQuests] fetch existing failed:", fetchError);
-    throw new Error("Failed to load existing smart quests");
+    throw new Error(
+      `Failed to load existing smart quests: ${fetchError.message || fetchError.code || "unknown"}`
+    );
   }
 
   const rows = (existing ?? []) as SmartQuestRow[];
@@ -261,7 +263,9 @@ export async function persistSmartQuestsForDay(
 
     if (deleteError) {
       console.error("[persistSmartQuests] delete pending failed:", deleteError);
-      throw new Error("Failed to clear pending smart quests");
+      throw new Error(
+        `Failed to clear pending smart quests: ${deleteError.message || deleteError.code || "unknown"}`
+      );
     }
   }
 
@@ -276,7 +280,9 @@ export async function persistSmartQuestsForDay(
 
   if (insertError) {
     console.error("[persistSmartQuests] insert failed:", insertError);
-    throw new Error("Failed to insert smart quests");
+    throw new Error(
+      `Failed to insert smart quests: ${insertError.message || insertError.code || "unknown"}`
+    );
   }
 
   return {
