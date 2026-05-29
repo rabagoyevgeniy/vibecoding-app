@@ -539,9 +539,28 @@ export default function MissionPage() {
     void loadHybridResponses();
   }, [user, day, mission, loading]);
 
-  const handleNexusPlanGenerated = useCallback(() => {
-    setSmartQuestsReloadKey((k) => k + 1);
-  }, []);
+  const handleNexusPlanGenerated = useCallback(
+    (meta: { smartQuestsInserted: boolean; persistError?: string; usedFallback?: boolean }) => {
+      if (meta.usedFallback) {
+        toast.error("Сервер планирования недоступен", {
+          description: "Показан локальный план. Квесты не сохранены — попробуй ещё раз позже.",
+          duration: 6000,
+        });
+      } else if (meta.persistError) {
+        toast.error("План создан, но квесты не сохранились", {
+          description: meta.persistError,
+          duration: 7000,
+        });
+      } else if (meta.smartQuestsInserted) {
+        toast.success("Smart Quests обновлены", {
+          description: "Новые квесты дня загружены из базы.",
+          duration: 3500,
+        });
+      }
+      setSmartQuestsReloadKey((k) => k + 1);
+    },
+    []
+  );
 
   // Nexus v2.0 — encapsulated in custom hook (clean separation of concerns)
   const {

@@ -8,6 +8,69 @@ import { ArtifactPreviewModal } from "./ArtifactPreviewModal";
 import { SqlPreviewModal } from "./SqlPreviewModal";
 import { CreditBalance } from "./CreditBalance";
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Преобразует structured-результат (например, Lean Canvas от
+ * business_model_generator) в читаемый HTML, чтобы переиспользовать
+ * существующий ArtifactPreviewModal вместо «пустого» успеха.
+ */
+function canvasResultToHtml(data: Record<string, any>, title = "Бизнес-модель"): string {
+  const skip = new Set(["_meta", "generatedAt"]);
+  const labels: Record<string, string> = {
+    idea: "Идея",
+    goal: "Цель",
+    problem: "Проблемы",
+    solution: "Решение",
+    uniqueValueProposition: "Уникальное ценностное предложение",
+    unfairAdvantage: "Несправедливое преимущество",
+    customerSegments: "Сегменты клиентов",
+    channels: "Каналы",
+    revenueStreams: "Источники дохода",
+    costStructure: "Структура затрат",
+    keyMetrics: "Ключевые метрики",
+    existingAlternatives: "Существующие альтернативы",
+  };
+
+  const sections = Object.entries(data || {})
+    .filter(([key, value]) => !skip.has(key) && value != null && value !== "")
+    .map(([key, value]) => {
+      const label = labels[key] || key;
+      let body = "";
+      if (Array.isArray(value)) {
+        body = `<ul>${value
+          .map((item) => `<li>${escapeHtml(String(item))}</li>`)
+          .join("")}</ul>`;
+      } else if (typeof value === "object") {
+        body = `<pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+      } else {
+        body = `<p>${escapeHtml(String(value))}</p>`;
+      }
+      return `<section><h2>${escapeHtml(label)}</h2>${body}</section>`;
+    })
+    .join("");
+
+  return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(
+    title
+  )}</title><style>
+    body{margin:0;background:#0b1120;color:#e2e8f0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6;padding:32px}
+    main{max-width:820px;margin:0 auto}
+    h1{font-size:28px;margin:0 0 24px;background:linear-gradient(135deg,#a78bfa,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+    section{background:#111827;border:1px solid #1f2937;border-radius:16px;padding:18px 22px;margin-bottom:16px}
+    h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:#a78bfa;margin:0 0 10px}
+    ul{margin:0;padding-left:20px}
+    li{margin-bottom:6px}
+    p{margin:0}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0b1120;padding:12px;border-radius:10px;font-size:13px}
+  </style></head><body><main><h1>${escapeHtml(title)}</h1>${sections}</main></body></html>`;
+}
+
 interface AIMentorProps {
   missionTitle: string;
   currentStep: string;
@@ -107,52 +170,90 @@ const AIMentorComponent = ({
     }, 1600);
   };
 
-  const handleExecute = async (action?: NexusAction) => {
-    if (action && onNexusExecute) {
-      // === REAL BILLING: Hold & Capture (check before spend) ===
-      if (balance < 150) {
-        setReasoningLogs([
-          { text: `[❌] Недостаточно кредитов. Пополните баланс.`, status: 'error' }
-        ]);
-        setThinking(false);
-        setRetryAction(null);
-        return; // Abort — no API call
-      }
+  // Следующий action, с которым пользователь реально может что-то сделать.
+  const nextActionableAction = nexusPlan.find(
+    (a) =>
+      a.status === 'pending' ||
+      a.status === 'pending_approval' ||
+      a.status === 'approved'
+  );
 
-      // === HARD SYNCHRONOUS LOG: exactly one line, then mutate on real result ===
-      startDynamicReasoning(action.toolName);
+  // Открыть structured-результат (бизнес-модель и т.п.) как HTML-превью.
+  const openCanvasPreview = (action: NexusAction) => {
+    const data = action?.result;
+    if (!data || typeof data !== 'object') return;
+    setPreviewHtml(canvasResultToHtml(data, action.toolName === 'business_model_generator' ? 'Бизнес-модель (Lean Canvas)' : 'Результат'));
+    setIsPreviewOpen(true);
+  };
 
-      try {
-        // Real execution in NexusEngine (calls /api/nexus/execute under the hood)
-        await onNexusExecute(action.id);
+  /**
+   * Реальный запуск действия Nexus с прохождением HITL-гейта.
+   * medium/high риск сначала аппрувим (onNexusApprove), затем исполняем —
+   * это убирает тупик в статусе pending_approval.
+   */
+  const runPlanAction = async (action: NexusAction) => {
+    if (!onNexusExecute) return;
 
-        // SUCCESS: mutate the single log entry
-        setReasoningLogs([
-          { text: `[✅] Ответ получен. Артефакт сохранен.`, status: 'done' }
-        ]);
-        setIsReasoningComplete(true);
-        setThinking(false);
-        setRetryAction(null);
-
-        // === CAPTURE: Deduct 150 credits only on real success (Refund Guard for errors)
-        setBalance(prev => Math.max(0, prev - 150));
-
-        // Trigger any result-driven side effects (preview, phase)
-        completeCurrentReasoning();
-      } catch (err: any) {
-        const errorText = err?.message || err?.toString() || 'Неизвестная ошибка API';
-        // ERROR: mutate the single log entry + enable Retry
-        setReasoningLogs([
-          { text: `[❌] Ошибка: ${errorText}`, status: 'error' }
-        ]);
-        setThinking(false);
-        setRetryAction(action);
-      }
-    } else {
-      setExecutionMode(true);
-      setPipelinePhase('executing');
-      setCurrentMicroStep(0);
+    // === REAL BILLING: Hold & Capture (check before spend) ===
+    if (balance < 150) {
+      setReasoningLogs([
+        { text: `[❌] Недостаточно кредитов. Пополните баланс.`, status: 'error' }
+      ]);
+      setThinking(false);
+      setRetryAction(null);
+      return;
     }
+
+    startDynamicReasoning(action.toolName);
+
+    try {
+      // HITL-гейт: medium/high риск требует подтверждения до запуска.
+      const needsApproval =
+        (action.riskLevel === 'medium' || action.riskLevel === 'high') &&
+        action.status !== 'approved' &&
+        action.status !== 'completed';
+
+      if (needsApproval && onNexusApprove) {
+        await onNexusApprove(action.id);
+      }
+
+      // Реальное исполнение в NexusEngine (вызывает /api/nexus/execute).
+      await onNexusExecute(action.id);
+
+      setReasoningLogs([
+        { text: `[✅] Ответ получен. Артефакт сохранён.`, status: 'done' }
+      ]);
+      setIsReasoningComplete(true);
+      setThinking(false);
+      setRetryAction(null);
+
+      // === CAPTURE: списываем кредиты только при реальном успехе.
+      setBalance(prev => Math.max(0, prev - 150));
+
+      completeCurrentReasoning();
+    } catch (err: any) {
+      const errorText = err?.message || err?.toString() || 'Неизвестная ошибка API';
+      setReasoningLogs([
+        { text: `[❌] Ошибка: ${errorText}`, status: 'error' }
+      ]);
+      setThinking(false);
+      setRetryAction(action);
+    }
+  };
+
+  // Кнопка нижней панели: если передан конкретный action — запускаем его,
+  // иначе берём следующий доступный action из плана (без фейковой симуляции).
+  const handleExecute = async (action?: NexusAction) => {
+    const target = action || nextActionableAction;
+    if (target && onNexusExecute) {
+      await runPlanAction(target);
+      return;
+    }
+
+    // Fallback: реального плана нет (demo) — локальный режим микрошагов.
+    setExecutionMode(true);
+    setPipelinePhase('executing');
+    setCurrentMicroStep(0);
   };
 
   const handleCompleteStep = () => {
@@ -238,16 +339,23 @@ const AIMentorComponent = ({
                   <div className="text-sm">
                     {action.toolName} <span className="text-xs opacity-60">({action.status})</span>
                   </div>
-                  {(action.status === 'pending' || action.status === 'approved') && onNexusExecute && (
+                  {(action.status === 'pending' || action.status === 'pending_approval' || action.status === 'approved') && onNexusExecute && (
                     <button
-                      onClick={() => handleExecute(action)}
+                      onClick={() => runPlanAction(action)}
                       className="text-xs px-3 py-1 rounded bg-[var(--accent)] text-white"
                     >
-                      Выполнить
+                      {(action.riskLevel === 'medium' || action.riskLevel === 'high') && action.status !== 'approved'
+                        ? 'Подтвердить и выполнить'
+                        : 'Выполнить'}
                     </button>
                   )}
                   {action.status === 'executing' && (
                     <span className="text-xs px-3 py-1 text-[var(--accent)]">Выполняется...</span>
+                  )}
+                  {action.status === 'failed' && onNexusExecute && (
+                    <button onClick={() => runPlanAction(action)} className="text-xs px-3 py-1 rounded border border-red-400/60 text-red-300">
+                      Повторить
+                    </button>
                   )}
                   {action.status === 'completed' && action.result?.html && (
                     <button onClick={() => openSitePreview(action)} className="text-xs px-3 py-1 rounded bg-green-600 text-white">
@@ -257,6 +365,11 @@ const AIMentorComponent = ({
                   {action.status === 'completed' && action.result?.sql && (
                     <button onClick={() => openSqlPreview(action)} className="text-xs px-3 py-1 rounded bg-green-600 text-white">
                       Посмотреть SQL
+                    </button>
+                  )}
+                  {action.status === 'completed' && action.result && typeof action.result === 'object' && !action.result.html && !action.result.sql && (
+                    <button onClick={() => openCanvasPreview(action)} className="text-xs px-3 py-1 rounded bg-green-600 text-white">
+                      Посмотреть
                     </button>
                   )}
                 </div>
@@ -336,40 +449,62 @@ const AIMentorComponent = ({
             </div>
           )}
 
-          {pipelinePhase === 'completed' && isReasoningComplete && (
-            <div className="flex gap-3">
-              {/* Smart Action Bar: show SQL button for database_schema_builder results */}
-              {nexusPlan.some((a) => a.status === 'completed' && a.result?.sql) ? (
-                <button
-                  onClick={() => {
-                    const dbAction = nexusPlan.find((a) => a.status === 'completed' && a.result?.sql);
-                    if (dbAction) openSqlPreview(dbAction);
-                  }}
-                  className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
-                  style={{ background: 'var(--success)' }}
-                >
-                  👁️ Посмотреть SQL-скрипт
-                </button>
-              ) : (
-                <>
+          {pipelinePhase === 'completed' && isReasoningComplete && (() => {
+            // Smart Action Bar: подбираем кнопку под реальный тип результата.
+            const sqlAction = nexusPlan.find((a) => a.status === 'completed' && a.result?.sql);
+            const htmlAction = nexusPlan.find((a) => a.status === 'completed' && a.result?.html);
+            const canvasAction = nexusPlan.find(
+              (a) => a.status === 'completed' && a.result && typeof a.result === 'object' && !a.result.html && !a.result.sql
+            );
+
+            if (sqlAction) {
+              return (
+                <div className="flex gap-3">
                   <button
-                    onClick={() => openSitePreview({ result: { html: previewHtml || '<div>Demo HTML</div>' } })}
+                    onClick={() => openSqlPreview(sqlAction)}
                     className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
                     style={{ background: 'var(--success)' }}
                   >
-                    👁️ Превью
+                    👁️ Посмотреть SQL-скрипт
                   </button>
+                </div>
+              );
+            }
+
+            if (htmlAction) {
+              return (
+                <div className="flex gap-3">
                   <button
-                    onClick={() => alert('Скачивание HTML...')}
-                    className="flex-1 py-3 text-sm font-semibold rounded-xl border"
-                    style={{ borderColor: 'var(--border)' }}
+                    onClick={() => openSitePreview(htmlAction)}
+                    className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
+                    style={{ background: 'var(--success)' }}
                   >
-                    💾 Скачать
+                    👁️ Превью лендинга
                   </button>
-                </>
-              )}
-            </div>
-          )}
+                </div>
+              );
+            }
+
+            if (canvasAction) {
+              return (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => openCanvasPreview(canvasAction)}
+                    className="flex-1 py-3 text-sm font-semibold text-white rounded-xl"
+                    style={{ background: 'var(--success)' }}
+                  >
+                    📄 Посмотреть бизнес-модель
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="text-center text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+                ✅ Готово. Результат сохранён в артефакты дня.
+              </div>
+            );
+          })()}
         </div>
       </div>
 

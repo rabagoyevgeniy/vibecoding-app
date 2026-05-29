@@ -116,6 +116,25 @@ export default function OnboardingPage() {
     (step === 3 && data.timePerDay !== null) ||
     step === 4; // idea is optional
 
+  /**
+   * Гонка с таймаутом: даже если запрос к Supabase/AI зависнет,
+   * промис разрешится, и пользователь не застрянет на экране загрузки.
+   */
+  function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T | null> {
+    return Promise.race([
+      Promise.resolve(promise).catch((e) => {
+        console.error(`[onboarding] ${label} failed:`, e);
+        return null;
+      }),
+      new Promise<null>((resolve) =>
+        setTimeout(() => {
+          console.warn(`[onboarding] ${label} timed out after ${ms}ms`);
+          resolve(null);
+        }, ms)
+      ),
+    ]);
+  }
+
   async function handleFinish() {
     setLoading(true);
     try {
@@ -131,34 +150,44 @@ export default function OnboardingPage() {
         // IMPORTANT: Write to the real base table (user_profiles) using the correct column.
         // vc_profiles is a read-only compatibility VIEW. Writing to it does not persist.
         // This ensures onboarding_completed (derived in VIEW) becomes true on next login.
-        await supabase.from("user_profiles").upsert(
-          {
-            user_id: user.id,
-            onboarding_data: {
-              goal: data.goal,
-              experience: data.experience,
-              time_per_day: data.timePerDay,
-              idea: data.idea || null,
+        await withTimeout(
+          supabase.from("user_profiles").upsert(
+            {
+              user_id: user.id,
+              onboarding_data: {
+                goal: data.goal,
+                experience: data.experience,
+                time_per_day: data.timePerDay,
+                idea: data.idea || null,
+              },
             },
-          },
-          { onConflict: "user_id" }
+            { onConflict: "user_id" }
+          ),
+          12000,
+          "profile upsert"
         );
 
-        // Generate personalized AI plan
-        await generateAndSavePlan(
-          user.id,
-          {
-            goal: data.goal || "money",
-            experience: data.experience || "beginner",
-            timePerDay: data.timePerDay || "1-2h",
-            idea: data.idea || "",
-          },
-          language
+        // Generate personalized AI plan (с защитой от зависания).
+        await withTimeout(
+          generateAndSavePlan(
+            user.id,
+            {
+              goal: data.goal || "money",
+              experience: data.experience || "beginner",
+              timePerDay: data.timePerDay || "1-2h",
+              idea: data.idea || "",
+            },
+            language
+          ),
+          25000,
+          "generateAndSavePlan"
         );
       }
-      router.push("/dashboard");
-    } catch {
-      router.push("/dashboard");
+    } catch (e) {
+      console.error("[onboarding] handleFinish unexpected error:", e);
+    } finally {
+      // Гарантированный переход вне зависимости от результата запросов.
+      router.replace("/dashboard");
     }
   }
 

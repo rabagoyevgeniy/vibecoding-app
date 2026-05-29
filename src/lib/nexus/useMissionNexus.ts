@@ -24,9 +24,15 @@ export interface UseMissionNexusReturn {
   handleNexusApprove: (actionId: string) => Promise<void>;
 }
 
+export interface PlanGeneratedMeta {
+  smartQuestsInserted: boolean;
+  persistError?: string;
+  usedFallback?: boolean;
+}
+
 export interface UseMissionNexusOptions {
-  /** Вызывается после успешной генерации плана (квесты сохранены в Supabase). */
-  onPlanGenerated?: () => void;
+  /** Вызывается после генерации плана с метаданными сохранения квестов. */
+  onPlanGenerated?: (meta: PlanGeneratedMeta) => void;
 }
 
 export function useMissionNexus(
@@ -71,13 +77,17 @@ export function useMissionNexus(
 
     setIsGeneratingPlan(true);
     try {
-      const actions = await nexusEngine.generatePlan(
+      const result = await nexusEngine.generatePlan(
         userId,
         `Помоги разработать материалы для Дня ${day}`,
         day
       );
-      setNexusActions(actions);
-      options?.onPlanGenerated?.();
+      setNexusActions(result.actions);
+      options?.onPlanGenerated?.({
+        smartQuestsInserted: result.smartQuestsInserted,
+        persistError: result.persistError,
+        usedFallback: result.usedFallback,
+      });
     } catch (e) {
       console.error('[useMissionNexus] Nexus plan generation failed', e);
     } finally {

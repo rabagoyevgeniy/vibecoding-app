@@ -44,20 +44,33 @@ async function finalizePlanResponse(
         options.projectId
       );
 
-  const { inserted, quests } = await persistSmartQuestsForDay(
-    supabase,
-    userId,
-    day,
-    questRows
-  );
+  // КРИТИЧНО: сохранение квестов оборачиваем в собственный try/catch.
+  // План уже сгенерирован успешно — нельзя ронять весь ответ в 500 и
+  // провоцировать тихий mock-fallback на клиенте. Вместо этого отдаём
+  // actions + явный persistError, чтобы UI показал понятную ошибку.
+  try {
+    const { inserted, quests } = await persistSmartQuestsForDay(
+      supabase,
+      userId,
+      day,
+      questRows
+    );
 
-  const smartQuests = quests.map(mapSmartQuestRow);
-
-  return NextResponse.json({
-    actions,
-    smartQuests,
-    smartQuestsInserted: inserted,
-  });
+    return NextResponse.json({
+      actions,
+      smartQuests: quests.map(mapSmartQuestRow),
+      smartQuestsInserted: inserted,
+    });
+  } catch (persistError: any) {
+    console.error('[Nexus Plan API] persistSmartQuestsForDay failed:', persistError);
+    return NextResponse.json({
+      actions,
+      smartQuests: [],
+      smartQuestsInserted: false,
+      persistError:
+        persistError?.message || 'Не удалось сохранить Smart Quests в базу.',
+    });
+  }
 }
 
 export async function POST(request: NextRequest) {

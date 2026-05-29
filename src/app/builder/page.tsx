@@ -52,12 +52,12 @@ export default function BuilderPage() {
     setIsGenerating(true);
 
     try {
-      const actions = await nexusEngine.generatePlan(
+      const result = await nexusEngine.generatePlan(
         user.id,
         idea.trim(),
         BUILDER_DAY
       );
-      setNexusActions(actions);
+      setNexusActions(result.actions);
     } catch (e) {
       console.error("[Builder] Nexus plan generation failed", e);
       // Graceful empty state – user can retry

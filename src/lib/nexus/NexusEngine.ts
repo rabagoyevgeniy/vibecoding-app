@@ -17,6 +17,16 @@ function generateId(): string {
   return 'nx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
 }
 
+/** Результат генерации плана: actions + статус сохранения Smart Quests. */
+export interface GeneratePlanResult {
+  actions: NexusAction[];
+  smartQuestsInserted: boolean;
+  /** Текст ошибки, если квесты не сохранились или сработал mock-fallback. */
+  persistError?: string;
+  /** true, если сервер был недоступен и вернулся локальный mock-план. */
+  usedFallback?: boolean;
+}
+
 /**
  * NexusEngine v2.0 — The central orchestrator for the AI agent system.
  *
@@ -134,7 +144,7 @@ export class NexusEngine {
     userId: string,
     userPrompt: string,
     currentDay: number
-  ): Promise<NexusAction[]> {
+  ): Promise<GeneratePlanResult> {
     const session = await this.getOrCreateSession(userId, currentDay, userPrompt);
 
     // === Test prompt for development (as requested) ===
@@ -171,14 +181,24 @@ export class NexusEngine {
         await saveNexusSession(userId, currentDay, session);
       }
 
-      return actions;
+      return {
+        actions,
+        smartQuestsInserted: data.smartQuestsInserted ?? false,
+        persistError: data.persistError,
+      };
     } catch (error: any) {
       console.error('[NexusEngine] Failed to call /api/nexus/plan:', error);
-      // Graceful fallback to local mock
+      // Graceful fallback to local mock — помечаем как fallback, чтобы UI
+      // мог показать предупреждение «работаем в офлайн-режиме».
       const mockActions = this.getMockPlan(finalPrompt, currentDay);
       session.actions.push(...mockActions);
       session.updatedAt = new Date().toISOString();
-      return mockActions;
+      return {
+        actions: mockActions,
+        smartQuestsInserted: false,
+        usedFallback: true,
+        persistError: error?.message || 'Сервер планирования недоступен.',
+      };
     }
   }
 
