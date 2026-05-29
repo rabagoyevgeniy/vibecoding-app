@@ -112,6 +112,8 @@ const AIMentorComponent = ({
   // Artifact preview (HTML + SQL)
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState("Готовый лендинг");
+  const [previewSubtitle, setPreviewSubtitle] = useState<string | undefined>(undefined);
 
   const [previewSql, setPreviewSql] = useState<string | null>(null);
   const [isSqlPreviewOpen, setIsSqlPreviewOpen] = useState(false);
@@ -150,6 +152,8 @@ const AIMentorComponent = ({
   const openSitePreview = (action: any) => {
     const html = action?.result?.html || previewHtml || '<h1>Demo Landing Page</h1>';
     setPreviewHtml(html);
+    setPreviewTitle("Готовый лендинг");
+    setPreviewSubtitle("Сгенерированный лендинг • Tailwind + современный дизайн");
     setIsPreviewOpen(true);
   };
 
@@ -182,7 +186,15 @@ const AIMentorComponent = ({
   const openCanvasPreview = (action: NexusAction) => {
     const data = action?.result;
     if (!data || typeof data !== 'object') return;
-    setPreviewHtml(canvasResultToHtml(data, action.toolName === 'business_model_generator' ? 'Бизнес-модель (Lean Canvas)' : 'Результат'));
+    const isBusinessModel = action.toolName === 'business_model_generator';
+    const title = isBusinessModel ? 'Бизнес-модель (Lean Canvas)' : 'Результат AI-действия';
+    setPreviewHtml(canvasResultToHtml(data, title));
+    setPreviewTitle(title);
+    setPreviewSubtitle(
+      isBusinessModel
+        ? 'Структурированная бизнес-модель от AI-команды'
+        : `Результат инструмента «${action.toolName.replace(/_/g, ' ')}»`
+    );
     setIsPreviewOpen(true);
   };
 
@@ -298,6 +310,8 @@ const AIMentorComponent = ({
 
     if (result?.html) {
       setPreviewHtml(result.html);
+      setPreviewTitle("Готовый лендинг");
+      setPreviewSubtitle("Сгенерированный лендинг • Tailwind + современный дизайн");
     }
   };
 
@@ -513,7 +527,8 @@ const AIMentorComponent = ({
         isOpen={isPreviewOpen}
         onClose={() => { setIsPreviewOpen(false); setPreviewHtml(null); }}
         html={previewHtml}
-        title="Готовый лендинг"
+        title={previewTitle}
+        subtitle={previewSubtitle}
       />
       <SqlPreviewModal
         isOpen={isSqlPreviewOpen}

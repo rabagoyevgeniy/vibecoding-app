@@ -7,6 +7,7 @@ interface ArtifactPreviewModalProps {
   onClose: () => void;
   html: string | null;
   title?: string;
+  subtitle?: string;
   loading?: boolean;
   downloadFilename?: string;
 }
@@ -16,6 +17,7 @@ export function ArtifactPreviewModal({
   onClose,
   html,
   title = "Превью лендинга",
+  subtitle = "Сгенерированный лендинг • Tailwind + современный дизайн",
   loading = false,
   downloadFilename = 'landing-page.html',
 }: ArtifactPreviewModalProps) {
@@ -99,7 +101,7 @@ export function ArtifactPreviewModal({
             <div>
               <h2 className="text-xl font-semibold">{title}</h2>
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                Сгенерированный лендинг • Tailwind + современный дизайн
+                {subtitle}
               </p>
             </div>
 
