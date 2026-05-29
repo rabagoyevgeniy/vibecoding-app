@@ -275,10 +275,17 @@ function AiAutoBody({ quest }: { quest: SmartQuest }) {
             <Terminal className="h-3 w-3" />
             ai-team.terminal
           </div>
-          <div className="ml-auto flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[var(--accent-light)]">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-light)] shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
-            running
-          </div>
+          {isCompleted ? (
+            <div className="ml-auto flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[var(--success)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)] shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+              done
+            </div>
+          ) : (
+            <div className="ml-auto flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[var(--accent-light)]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-light)] shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
+              running
+            </div>
+          )}
         </div>
 
         {/* Лог */}
@@ -331,30 +338,48 @@ function AiAutoBody({ quest }: { quest: SmartQuest }) {
         </div>
       </div>
 
-      {/* Подпись + locked CTA */}
+      {/* Подпись + статус-CTA */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-light)]" />
+        <div
+          className="flex items-center gap-2 text-xs"
+          style={{ color: isCompleted ? "var(--success)" : "var(--text-muted)" }}
+        >
+          {isCompleted ? (
+            <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+          ) : (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-light)]" />
+          )}
           <span>
             {isCompleted
-              ? "AI-команда завершила задачу. Жду подтверждения."
+              ? "AI-команда выполнила задачу."
               : "AI-команда выполняет задачу..."}
           </span>
         </div>
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          className="inline-flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold opacity-70"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            borderColor: "var(--border)",
-            color: "var(--text-muted)",
-          }}
-        >
-          <Lock className="h-3.5 w-3.5" />
-          Заблокировано
-        </button>
+        {isCompleted ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold"
+            style={{
+              background: "rgba(34,197,94,0.12)",
+              borderColor: "rgba(34,197,94,0.4)",
+              color: "var(--success)",
+            }}
+          >
+            <Check className="h-3.5 w-3.5" />
+            Готово
+          </span>
+        ) : (
+          <span
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold opacity-70"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              borderColor: "var(--border)",
+              color: "var(--text-muted)",
+            }}
+          >
+            <Lock className="h-3.5 w-3.5" />
+            Авто
+          </span>
+        )}
       </div>
     </div>
   );

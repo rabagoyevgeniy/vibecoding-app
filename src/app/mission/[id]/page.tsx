@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { MISSIONS, type Mission } from "@/lib/missions-data";
@@ -186,6 +186,9 @@ export default function MissionPage() {
   const [smartQuests, setSmartQuests] = useState<SmartQuest[]>([]);
   const [smartQuestsLoading, setSmartQuestsLoading] = useState(true);
   const [smartQuestsReloadKey, setSmartQuestsReloadKey] = useState(0);
+  // ai_auto квесты выполняются «AI-командой» сами: запоминаем уже запущенные,
+  // чтобы перерендеры не триггерили их повторно.
+  const autoRunTriggeredRef = useRef<Set<string>>(new Set());
 
   // Vision Help (ai_vision_help): какой квест прямо сейчас анализируется
   // и какие подсказки уже получены от AI-наставника. Прокидываются в карточку
@@ -382,6 +385,61 @@ export default function MissionPage() {
     let cancelled = false;
     const supabase = createClient();
 
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    /**
+     * Авто-выполнение `ai_auto` квестов: AI-команда «сама» делает работу.
+     * Прокручиваем pending ai_auto последовательно — проигрываем терминальную
+     * анимацию, затем помечаем completed через серверный `completeQuest` (+XP).
+     * user_action / ai_vision_help не трогаем — это зона ответственности CEO.
+     */
+    async function autoRunAiQuests(quests: SmartQuest[]) {
+      for (const quest of quests) {
+        if (cancelled) return;
+        if (quest.execution_type !== "ai_auto") continue;
+        if ((quest.status ?? "pending") !== "pending") continue;
+        if (autoRunTriggeredRef.current.has(quest.id)) continue;
+
+        autoRunTriggeredRef.current.add(quest.id);
+
+        // Даём «терминалу» проиграть лог (≈ по строке каждые 900мс в карточке).
+        const lineCount = quest.ai_log_lines?.length ?? 6;
+        await sleep(Math.min(1800 + lineCount * 650, 6500));
+        if (cancelled) return;
+
+        try {
+          const saved = await completeQuest(quest.id, {
+            result: "AI-команда выполнила задачу автоматически.",
+          });
+          if (cancelled) return;
+
+          if (saved.success) {
+            applyQuestCompletion(
+              saved.quest,
+              saved.xpAwarded,
+              saved.current_xp,
+              saved.new_level
+            );
+            toast.success("AI-команда завершила задачу", {
+              description:
+                saved.xpAwarded > 0
+                  ? `+${saved.xpAwarded} XP • результат сохранён`
+                  : undefined,
+              duration: 3500,
+            });
+          } else {
+            // Снимаем «замок», чтобы при перезагрузке можно было попробовать снова.
+            autoRunTriggeredRef.current.delete(quest.id);
+            console.error("[mission] auto ai_auto complete failed:", saved.error);
+          }
+        } catch (err) {
+          autoRunTriggeredRef.current.delete(quest.id);
+          console.error("[mission] auto ai_auto threw:", err);
+        }
+      }
+    }
+
     async function loadSmartQuests() {
       setSmartQuestsLoading(true);
 
@@ -397,13 +455,16 @@ export default function MissionPage() {
       if (error) {
         console.error("[mission] load smart_quests failed:", error);
         setSmartQuests([]);
-      } else {
-        setSmartQuests(
-          (data as SmartQuestRow[] | null)?.map(mapSmartQuestRow) ?? []
-        );
+        setSmartQuestsLoading(false);
+        return;
       }
 
+      const quests = (data as SmartQuestRow[] | null)?.map(mapSmartQuestRow) ?? [];
+      setSmartQuests(quests);
       setSmartQuestsLoading(false);
+
+      // Запускаем фоновую авто-работу AI-команды (не блокирует рендер).
+      void autoRunAiQuests(quests);
     }
 
     void loadSmartQuests();
@@ -411,7 +472,7 @@ export default function MissionPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, day, smartQuestsReloadKey]);
+  }, [user?.id, day, smartQuestsReloadKey, applyQuestCompletion]);
 
   const NEXUS_WORKSPACE_URL = "https://ai.studio/apps/79c5a5dc-f3b8-4212-901d-eb9564ec6391";
 
